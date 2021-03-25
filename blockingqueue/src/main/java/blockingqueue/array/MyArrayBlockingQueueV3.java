@@ -1,14 +1,17 @@
-package blockingqueue.v1;
+package blockingqueue.array;
 
 import blockingqueue.MyBlockingQueue;
+
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v1版本
+ * 数组作为底层结构的阻塞队列 v2版本
  */
-public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
+public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
 
     /**
      * 队列默认的容量大小
@@ -35,23 +38,25 @@ public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
      * */
     private int count;
 
+    private final ReentrantLock reentrantLock;
+
+    private final Condition notEmpty;
+
+    private final Condition notFull;
+
+
     //=================================================构造方法======================================================
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV1() {
-        // 设置数组大小为默认
-        this.elements = new Object[DEFAULT_CAPACITY];
-
-        // 初始化队列 头部,尾部下标
-        this.head = 0;
-        this.tail = 0;
+    public MyArrayBlockingQueueV3() {
+       this(DEFAULT_CAPACITY);
     }
 
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV1(int initCapacity) {
+    public MyArrayBlockingQueueV3(int initCapacity) {
         assert initCapacity > 0;
 
         // 设置数组大小为默认
@@ -60,6 +65,10 @@ public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
         // 初始化队列 头部,尾部下标
         this.head = 0;
         this.tail = 0;
+
+        this.reentrantLock = new ReentrantLock();
+        this.notEmpty = this.reentrantLock.newCondition();
+        this.notFull = this.reentrantLock.newCondition();
     }
 
     /**
@@ -133,34 +142,46 @@ public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
 
     @Override
     public void put(E e) throws InterruptedException {
-        while (true) {
-            synchronized (this) {
-                // 队列未满时执行入队操作
-                if (count != elements.length) {
-                    // 入队，并返回
-                    enqueue(e);
-                    return;
-                }
+        // 先尝试获得互斥锁，以进入临界区
+        reentrantLock.lockInterruptibly();
+        try {
+            // 因为被消费者唤醒后可能会被其它的生产者再度填满队列，需要循环的判断
+            while (this.count == elements.length) {
+                // put操作时，如果队列已满则进入notFull条件变量的等待队列，并释放条件变量对应的互斥锁
+                notFull.await();
+                // 消费者进行出队操作时
             }
+            // 走到这里，说明当前队列不满，可以执行入队操作
+            enqueue(e);
 
-            // 队列已满，休眠一段时间后重试
-            Thread.sleep(200L);
+            // 唤醒可能等待在notEmpty中的一个消费者线程
+            notEmpty.signal();
+        } finally {
+            // 入队完毕，释放锁
+            reentrantLock.unlock();
         }
     }
 
     @Override
     public E take() throws InterruptedException {
-        while (true) {
-            synchronized (this) {
-                // 队列非空时执行出队操作
-                if (count != 0) {
-                    // 出队并立即返回
-                    return dequeue();
-                }
+        // 先尝试获得互斥锁，以进入临界区
+        reentrantLock.lockInterruptibly();
+
+        try {
+            // 因为被生产者唤醒后可能会被其它的消费者消费而使得队列再次为空，需要循环的判断
+            while(this.count == 0){
+                notEmpty.await();
             }
 
-            // 队列为空的情况下休眠200ms
-            Thread.sleep(200L);
+            E headElement = dequeue();
+
+            // 唤醒可能等待在notFull中的一个生产者线程
+            notFull.signal();
+
+            return headElement;
+        } finally {
+            // 出队完毕，释放锁
+            reentrantLock.unlock();
         }
     }
 

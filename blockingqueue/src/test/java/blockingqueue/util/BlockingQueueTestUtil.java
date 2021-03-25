@@ -22,10 +22,12 @@ public class BlockingQueueTestUtil {
         for(int i=0; i<repeatTime; i++){
             long oneTurnTime = oneTurnExecute(executorService,blockingQueue,workerNum,perWorkerProcessNum);
             totalTime += oneTurnTime;
-            System.out.println("turn=" + i + " costTime=" + oneTurnTime + "ms");
+//            System.out.println("turn=" + i + " costTime=" + oneTurnTime + "ms");
         }
 
         executorService.shutdown();
+
+        assert blockingQueue.isEmpty();
 
         return totalTime/repeatTime;
     }
