@@ -13,7 +13,7 @@ public class BlockingQueuePerformanceTest {
     /**
      * 队列容量
      * */
-    private static final int QUEUE_CAPACITY = 5;
+    private static final int QUEUE_CAPACITY = 2;
 
     /**
      * 并发线程数（消费者 + 生产者 = 2 * WORKER_NUM）
@@ -28,7 +28,7 @@ public class BlockingQueuePerformanceTest {
     /**
      * 重复执行的次数
      * */
-    private static final int REPEAT_TIME = 10;
+    private static final int REPEAT_TIME = 5;
 
 
     public static void main(String[] args) throws InterruptedException {
