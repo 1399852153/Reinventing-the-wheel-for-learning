@@ -35,4 +35,9 @@ public interface MyBlockingQueue<E> {
      * 队列为空时阻塞当前线程，直到队列被其它元素插入新元素并出队成功
      * */
     E take() throws InterruptedException;
+
+    /**
+     * 队列是否为空
+     * */
+    boolean isEmpty();
 }

@@ -12,16 +12,22 @@ import java.util.concurrent.Executors;
  */
 public class BlockingQueueTestUtil {
 
-    public static void statisticBlockingQueueRuntime(
+    public static long statisticBlockingQueueRuntime(
             MyBlockingQueue<Integer> blockingQueue, int workerNum, int perWorkerProcessNum, int repeatTime) throws InterruptedException {
         ExecutorService executorService = Executors.newFixedThreadPool(workerNum * 2);
+        // 第一次执行时存在一定的初始化开销，不进行统计
+        oneTurnExecute(executorService,blockingQueue,workerNum,perWorkerProcessNum);
 
+        long totalTime = 0;
         for(int i=0; i<repeatTime; i++){
             long oneTurnTime = oneTurnExecute(executorService,blockingQueue,workerNum,perWorkerProcessNum);
+            totalTime += oneTurnTime;
             System.out.println("turn=" + i + " costTime=" + oneTurnTime + "ms");
         }
 
         executorService.shutdown();
+
+        return totalTime/repeatTime;
     }
 
     private static long oneTurnExecute(ExecutorService executorService, MyBlockingQueue<Integer> blockingQueue,
