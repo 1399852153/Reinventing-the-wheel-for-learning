@@ -79,16 +79,6 @@ public class MyArrayBlockingQueueV4<E> implements MyBlockingQueue<E> {
         return (E) e;
     }
 
-    @Override
-    public boolean offer(E e) {
-        return false;
-    }
-
-    @Override
-    public E poll() {
-        return null;
-    }
-
     /**
      * 将指定元素插入队列
      *

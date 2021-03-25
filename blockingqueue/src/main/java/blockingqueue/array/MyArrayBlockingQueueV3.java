@@ -122,24 +122,6 @@ public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
         return dataNeedRemove;
     }
 
-
-    @Override
-    public boolean offer(E e) {
-        if(this.head == this.tail){
-            // 队列已满
-            return false;
-        }else{
-            // 队列未满，入队
-            enqueue(e);
-            return true;
-        }
-    }
-
-    @Override
-    public E poll() {
-        return dequeue();
-    }
-
     @Override
     public void put(E e) throws InterruptedException {
         // 先尝试获得互斥锁，以进入临界区

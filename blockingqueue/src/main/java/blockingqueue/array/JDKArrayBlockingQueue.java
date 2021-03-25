@@ -25,16 +25,6 @@ public class JDKArrayBlockingQueue<E> implements MyBlockingQueue<E> {
     }
 
     @Override
-    public boolean offer(E e) {
-        return jdkBlockingQueue.offer(e);
-    }
-
-    @Override
-    public E poll() {
-        return jdkBlockingQueue.poll();
-    }
-
-    @Override
     public void put(E e) throws InterruptedException {
         jdkBlockingQueue.put(e);
     }

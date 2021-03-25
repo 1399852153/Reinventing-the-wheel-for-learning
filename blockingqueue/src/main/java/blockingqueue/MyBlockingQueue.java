@@ -10,19 +10,19 @@ package blockingqueue;
  */
 public interface MyBlockingQueue<E> {
 
-    /**
-     * 插入特定元素e，加入队尾
-     * 非阻塞，立即返回结果
-     * @return 返回true代表插入成功，返回false代表此前队列已满插入失败
-     * */
-    boolean offer(E e);
-
-    /**
-     * 队列头部的元素出队(返回头部元素，将其从队列中删除)
-     * 非阻塞，立即返回结果
-     * @return 返回头部元素，队列为空则返回null
-     * */
-    E poll();
+//    /**
+//     * 插入特定元素e，加入队尾
+//     * 非阻塞，立即返回结果
+//     * @return 返回true代表插入成功，返回false代表此前队列已满插入失败
+//     * */
+//    boolean offer(E e);
+//
+//    /**
+//     * 队列头部的元素出队(返回头部元素，将其从队列中删除)
+//     * 非阻塞，立即返回结果
+//     * @return 返回头部元素，队列为空则返回null
+//     * */
+//    E poll();
 
     /**
      * 插入特定元素e，加入队尾
