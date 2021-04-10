@@ -2,14 +2,14 @@ package blockingqueue.array;
 
 import blockingqueue.MyBlockingQueue;
 
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * @author xiongyx
  * @date 2021/3/25
  */
-public class JDKArrayBlockingQueue<E> implements MyBlockingQueue<E> {
+public class JDKLinkedBlockingQueue<E> implements MyBlockingQueue<E> {
 
     private final BlockingQueue<E> jdkBlockingQueue;
 
@@ -18,10 +18,10 @@ public class JDKArrayBlockingQueue<E> implements MyBlockingQueue<E> {
      *
      * @param capacity  队列大小
      */
-    public JDKArrayBlockingQueue(int capacity) {
+    public JDKLinkedBlockingQueue(int capacity) {
         if (capacity <= 0)
             throw new IllegalArgumentException();
-        jdkBlockingQueue = new ArrayBlockingQueue<>(capacity);
+        jdkBlockingQueue = new LinkedBlockingQueue<>(capacity);
     }
 
     @Override
@@ -41,7 +41,7 @@ public class JDKArrayBlockingQueue<E> implements MyBlockingQueue<E> {
 
     @Override
     public String toString() {
-        return "JDKArrayBlockingQueue{" +
+        return "JDKLinkedBlockingQueue{" +
                 "jdkBlockingQueue=" + jdkBlockingQueue +
                 '}';
     }

@@ -40,10 +40,7 @@ public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
 
     private final ReentrantLock reentrantLock;
 
-    private final Condition notEmpty;
-
-    private final Condition notFull;
-
+    private final Condition condition;
 
     //=================================================构造方法======================================================
     /**
@@ -67,8 +64,7 @@ public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
         this.tail = 0;
 
         this.reentrantLock = new ReentrantLock();
-        this.notEmpty = this.reentrantLock.newCondition();
-        this.notFull = this.reentrantLock.newCondition();
+        this.condition = this.reentrantLock.newCondition();
     }
 
     /**
@@ -129,15 +125,15 @@ public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
         try {
             // 因为被消费者唤醒后可能会被其它的生产者再度填满队列，需要循环的判断
             while (this.count == elements.length) {
-                // put操作时，如果队列已满则进入notFull条件变量的等待队列，并释放条件变量对应的互斥锁
-                notFull.await();
-                // 消费者进行出队操作时
+                // put操作时，如果队列已满则进入条件变量的等待队列，并释放条件变量对应的锁
+                condition.await();
             }
             // 走到这里，说明当前队列不满，可以执行入队操作
             enqueue(e);
 
-            // 唤醒可能等待在notEmpty中的一个消费者线程
-            notEmpty.signal();
+            // 唤醒可能等待着的消费者线程
+            // 由于共用了一个condition，所以不能用signal，否则一旦唤醒的也是生产者线程就会陷入上面的while死循环）
+            condition.signalAll();
         } finally {
             // 入队完毕，释放锁
             reentrantLock.unlock();
@@ -152,13 +148,14 @@ public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
         try {
             // 因为被生产者唤醒后可能会被其它的消费者消费而使得队列再次为空，需要循环的判断
             while(this.count == 0){
-                notEmpty.await();
+                condition.await();
             }
 
             E headElement = dequeue();
 
-            // 唤醒可能等待在notFull中的一个生产者线程
-            notFull.signal();
+            // 唤醒可能等待着的生产者线程
+            // 由于共用了一个condition，所以不能用signal，否则一旦唤醒的也是消费者线程就会陷入上面的while死循环）
+            condition.signalAll();
 
             return headElement;
         } finally {

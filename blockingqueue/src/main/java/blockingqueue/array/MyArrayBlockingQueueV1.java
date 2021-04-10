@@ -54,7 +54,6 @@ public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
     public MyArrayBlockingQueueV1(int initCapacity) {
         assert initCapacity > 0;
 
-        // 设置数组大小为默认
         this.elements = new Object[initCapacity];
 
         // 初始化队列 头部,尾部下标
@@ -114,36 +113,13 @@ public class MyArrayBlockingQueueV1<E> implements MyBlockingQueue<E> {
     }
 
     @Override
-    public void put(E e) throws InterruptedException {
-        while (true) {
-            synchronized (this) {
-                // 队列未满时执行入队操作
-                if (count != elements.length) {
-                    // 入队，并返回
-                    enqueue(e);
-                    return;
-                }
-            }
-
-            // 队列已满，休眠一段时间后重试
-            Thread.sleep(100L);
-        }
+    public void put(E e){
+        enqueue(e);
     }
 
     @Override
-    public E take() throws InterruptedException {
-        while (true) {
-            synchronized (this) {
-                // 队列非空时执行出队操作
-                if (count != 0) {
-                    // 出队并立即返回
-                    return dequeue();
-                }
-            }
-
-            // 队列为空的情况下,休眠一段时间后重试
-            Thread.sleep(100L);
-        }
+    public E take() {
+       return dequeue();
     }
 
     @Override

@@ -2,14 +2,11 @@ package blockingqueue.array;
 
 import blockingqueue.MyBlockingQueue;
 
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
-
 /**
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v2版本
+ * 数组作为底层结构的阻塞队列 v1版本
  */
 public class MyArrayBlockingQueueV2<E> implements MyBlockingQueue<E> {
 
@@ -38,16 +35,17 @@ public class MyArrayBlockingQueueV2<E> implements MyBlockingQueue<E> {
      * */
     private int count;
 
-    private final ReentrantLock reentrantLock;
-
-    private final Condition condition;
-
     //=================================================构造方法======================================================
     /**
      * 默认构造方法
      * */
     public MyArrayBlockingQueueV2() {
-       this(DEFAULT_CAPACITY);
+        // 设置数组大小为默认
+        this.elements = new Object[DEFAULT_CAPACITY];
+
+        // 初始化队列 头部,尾部下标
+        this.head = 0;
+        this.tail = 0;
     }
 
     /**
@@ -62,9 +60,6 @@ public class MyArrayBlockingQueueV2<E> implements MyBlockingQueue<E> {
         // 初始化队列 头部,尾部下标
         this.head = 0;
         this.tail = 0;
-
-        this.reentrantLock = new ReentrantLock();
-        this.condition = this.reentrantLock.newCondition();
     }
 
     /**
@@ -120,47 +115,34 @@ public class MyArrayBlockingQueueV2<E> implements MyBlockingQueue<E> {
 
     @Override
     public void put(E e) throws InterruptedException {
-        // 先尝试获得互斥锁，以进入临界区
-        reentrantLock.lockInterruptibly();
-        try {
-            // 因为被消费者唤醒后可能会被其它的生产者再度填满队列，需要循环的判断
-            while (this.count == elements.length) {
-                // put操作时，如果队列已满则进入条件变量的等待队列，并释放条件变量对应的锁
-                condition.await();
+        while (true) {
+            synchronized (this) {
+                // 队列未满时执行入队操作
+                if (count != elements.length) {
+                    // 入队，并返回
+                    enqueue(e);
+                    return;
+                }
             }
-            // 走到这里，说明当前队列不满，可以执行入队操作
-            enqueue(e);
 
-            // 唤醒可能等待着的消费者线程
-            // 由于共用了一个condition，所以不能用signal，否则一旦唤醒的也是生产者线程就会陷入上面的while死循环）
-            condition.signalAll();
-        } finally {
-            // 入队完毕，释放锁
-            reentrantLock.unlock();
+            // 队列已满，休眠一段时间后重试
+            Thread.sleep(100L);
         }
     }
 
     @Override
     public E take() throws InterruptedException {
-        // 先尝试获得互斥锁，以进入临界区
-        reentrantLock.lockInterruptibly();
-
-        try {
-            // 因为被生产者唤醒后可能会被其它的消费者消费而使得队列再次为空，需要循环的判断
-            while(this.count == 0){
-                condition.await();
+        while (true) {
+            synchronized (this) {
+                // 队列非空时执行出队操作
+                if (count != 0) {
+                    // 出队并立即返回
+                    return dequeue();
+                }
             }
 
-            E headElement = dequeue();
-
-            // 唤醒可能等待着的生产者线程
-            // 由于共用了一个condition，所以不能用signal，否则一旦唤醒的也是消费者线程就会陷入上面的while死循环）
-            condition.signalAll();
-
-            return headElement;
-        } finally {
-            // 出队完毕，释放锁
-            reentrantLock.unlock();
+            // 队列为空的情况下,休眠一段时间后重试
+            Thread.sleep(100L);
         }
     }
 
