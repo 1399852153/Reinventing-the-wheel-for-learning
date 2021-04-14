@@ -1,8 +1,6 @@
 package blockingqueue.util;
 
 import blockingqueue.MyBlockingQueue;
-import blockingqueue.array.MyArrayBlockingQueueV5;
-
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -12,12 +10,6 @@ import java.util.concurrent.Executors;
  * @date 2021/3/24
  */
 public class BlockingQueueTestUtil {
-
-    public static void main(String[] args) throws InterruptedException {
-        MyBlockingQueue<Integer> myArrayBlockingQueueV4 = new MyArrayBlockingQueueV5<>(3);
-        long avgCostTimeV4 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV4, 100, 3000, 5);
-        System.out.println("avgCostTimeV4=" + avgCostTimeV4);
-    }
 
     public static long statisticBlockingQueueRuntime(
             MyBlockingQueue<Integer> blockingQueue, int workerNum, int perWorkerProcessNum, int repeatTime) throws InterruptedException {
