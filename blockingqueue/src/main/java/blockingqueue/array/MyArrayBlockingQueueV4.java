@@ -10,7 +10,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v2版本
+ * 数组作为底层结构的阻塞队列 v4版本
  */
 public class MyArrayBlockingQueueV4<E> implements MyBlockingQueue<E> {
 
@@ -171,12 +171,5 @@ public class MyArrayBlockingQueueV4<E> implements MyBlockingQueue<E> {
     @Override
     public boolean isEmpty() {
         return this.count == 0;
-    }
-
-    @Override
-    public String toString() {
-        return "MyArrayBlockingQueueV3{" +
-                "elements=" + Arrays.toString(elements) +
-                '}';
     }
 }

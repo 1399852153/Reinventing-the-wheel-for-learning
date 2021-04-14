@@ -9,7 +9,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v2版本
+ * 数组作为底层结构的阻塞队列 v3版本
  */
 public class MyArrayBlockingQueueV3<E> implements MyBlockingQueue<E> {
 

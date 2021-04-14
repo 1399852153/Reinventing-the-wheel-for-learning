@@ -3,19 +3,18 @@ package blockingqueue.array;
 import blockingqueue.MyBlockingQueue;
 
 import java.util.Arrays;
-import java.util.Date;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 最终优化版的阻塞队列
+ * 博客中最终优化版的阻塞队列
  * */
-public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
+public class MyArrayBlockingQueueV5NeedOpt<E> implements MyBlockingQueue<E> {
 
-    /**
-     * 存放元素的数组
-     * */
+    private final AtomicInteger sCount = new AtomicInteger(0);
+
+    /** 存放元素的数组 */
     private final Object[] items;
 
     /** 弹出元素的位置 */
@@ -25,7 +24,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
     private int putIndex;
 
     /** 队列中的元素总数 */
-    private final AtomicInteger count = new AtomicInteger(0);
+    private AtomicInteger count = new AtomicInteger(0);
 
     /** 插入锁 */
     private final ReentrantLock putLock = new ReentrantLock();
@@ -44,7 +43,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
      *
      * @param capacity  队列大小
      */
-    public MyArrayBlockingQueueV5(int capacity) {
+    public MyArrayBlockingQueueV5NeedOpt(int capacity) {
         if (capacity <= 0)
             throw new IllegalArgumentException();
         items = new Object[capacity];
@@ -90,6 +89,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
      */
     @Override
     public void put(E e) throws InterruptedException {
+        System.out.println(Thread.currentThread().getName() + " put " + Arrays.toString(this.items) + " sCount=" + sCount.incrementAndGet());
         int c = -1;
         putLock.lockInterruptibly();
         try {
@@ -97,6 +97,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
                 // 队列已满时进入休眠
                 // 等待队列未满条件得到满足
                 notFull.await();
+
             }
             // 执行入队操作，将对象e实际放入队列中
             enqueue(e);
@@ -125,8 +126,6 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
         // 为了唤醒等待队列非空条件的线程，需要先获取对应的takeLock
         takeLock.lock();
         try {
-            System.out.println(Thread.currentThread().getName() + " signalNotEmpty notEmpty.signal " + Arrays.toString(this.items));
-
             // 唤醒一个等待非空条件的线程
             notEmpty.signal();
         } finally {
@@ -148,10 +147,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
             while (count.get() == 0) {
                 // 队列为空时进入休眠
                 // 等待队列非空条件得到满足
-                System.out.println(Thread.currentThread().getName() + " notEmpty before await " + Arrays.toString(this.items));
                 notEmpty.await();
-                System.out.println(Thread.currentThread().getName() + " notEmpty after await " + Arrays.toString(this.items));
-
             }
             // 执行出队操作，将队列中的第一个元素弹出
             e = dequeue();
@@ -167,9 +163,8 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
         }
         // 只有在弹出之前队列已满的情况下才唤醒等待插入元素的线程
         // 为了防止死锁，不能在释放takeLock之前获取putLock
-        if (c == items.length) {
+        if (c == items.length)
             signalNotFull();
-        }
         return e;
     }
 
@@ -180,7 +175,7 @@ public class MyArrayBlockingQueueV5<E> implements MyBlockingQueue<E> {
 
     @Override
     public String toString() {
-        return "MyArrayBlockingQueueV5{" +
+        return "MyArrayBlockingQueueV5NeedOpt{" +
                 "items=" + Arrays.toString(items) +
                 '}';
     }
