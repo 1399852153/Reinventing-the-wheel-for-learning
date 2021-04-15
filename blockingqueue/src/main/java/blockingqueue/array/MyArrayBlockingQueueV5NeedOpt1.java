@@ -9,9 +9,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v4版本
+ * 数组作为底层结构的阻塞队列 v5待优化版本1
  */
-public class MyArrayBlockingQueueV5NeedOpt<E> implements MyBlockingQueue<E> {
+public class MyArrayBlockingQueueV5NeedOpt1<E> implements MyBlockingQueue<E> {
 
     /**
      * 队列默认的容量大小
@@ -51,14 +51,14 @@ public class MyArrayBlockingQueueV5NeedOpt<E> implements MyBlockingQueue<E> {
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV5NeedOpt() {
+    public MyArrayBlockingQueueV5NeedOpt1() {
        this(DEFAULT_CAPACITY);
     }
 
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV5NeedOpt(int initCapacity) {
+    public MyArrayBlockingQueueV5NeedOpt1(int initCapacity) {
         assert initCapacity > 0;
 
         // 设置数组大小为默认
