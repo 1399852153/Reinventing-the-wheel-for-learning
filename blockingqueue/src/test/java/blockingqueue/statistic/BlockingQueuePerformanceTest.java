@@ -33,12 +33,6 @@ public class BlockingQueuePerformanceTest {
 
     public static void main(String[] args) throws InterruptedException {
 //        {
-//        MyBlockingQueue<Integer> myArrayBlockingQueueV1 = new MyArrayBlockingQueueV1<>(QUEUE_CAPACITY);
-//        long avgCostTimeV1 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV1,WORKER_NUM,PER_WORKER_PROCESS_NUM,REPEAT_TIME);
-//        System.out.println("MyArrayBlockingQueueV1 avgCostTime=" + avgCostTimeV1);
-//        }
-
-//        {
 //            MyBlockingQueue<Integer> myArrayBlockingQueueV2 = new MyArrayBlockingQueueV2<>(QUEUE_CAPACITY);
 //            long avgCostTimeV2 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV2, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
 //            System.out.println(costTimeLog(MyArrayBlockingQueueV2.class, avgCostTimeV2));
@@ -62,17 +56,17 @@ public class BlockingQueuePerformanceTest {
             System.out.println(costTimeLog(MyArrayBlockingQueueV5.class, avgCostTimeV5));
         }
 
-//        {
-//            MyBlockingQueue<Integer> jdkArrayBlockingQueue = new JDKArrayBlockingQueue<>(QUEUE_CAPACITY);
-//            long avgCostTimeJDK = BlockingQueueTestUtil.statisticBlockingQueueRuntime(jdkArrayBlockingQueue, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-//            System.out.println(costTimeLog(JDKArrayBlockingQueue.class, avgCostTimeJDK));
-//        }
-//
-//        {
-//            MyBlockingQueue<Integer> jdkLinkedBlockingQueue = new JDKLinkedBlockingQueue<>(QUEUE_CAPACITY);
-//            long avgCostTimeJDK = BlockingQueueTestUtil.statisticBlockingQueueRuntime(jdkLinkedBlockingQueue, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-//            System.out.println(costTimeLog(JDKLinkedBlockingQueue.class, avgCostTimeJDK));
-//        }
+        {
+            MyBlockingQueue<Integer> jdkArrayBlockingQueue = new JDKArrayBlockingQueue<>(QUEUE_CAPACITY);
+            long avgCostTimeJDK = BlockingQueueTestUtil.statisticBlockingQueueRuntime(jdkArrayBlockingQueue, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+            System.out.println(costTimeLog(JDKArrayBlockingQueue.class, avgCostTimeJDK));
+        }
+
+        {
+            MyBlockingQueue<Integer> jdkLinkedBlockingQueue = new JDKLinkedBlockingQueue<>(QUEUE_CAPACITY);
+            long avgCostTimeJDK = BlockingQueueTestUtil.statisticBlockingQueueRuntime(jdkLinkedBlockingQueue, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+            System.out.println(costTimeLog(JDKLinkedBlockingQueue.class, avgCostTimeJDK));
+        }
     }
 
     private static String costTimeLog(Class blockQueueCLass,long costTime){
