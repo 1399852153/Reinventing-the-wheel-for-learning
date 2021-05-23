@@ -12,7 +12,7 @@ import java.util.concurrent.Executors;
 public class MyAqsV1Test {
 
     public static void main(String[] args) throws InterruptedException {
-       testConcurrentAdd(10,10);
+       testConcurrentAdd(100,10000);
     }
 
     private static void testConcurrentAdd(int concurrentThreadNum,int repeatNum) throws InterruptedException {
@@ -33,8 +33,12 @@ public class MyAqsV1Test {
             });
         }
 
-        Thread.sleep(concurrentThreadNum * 100L);
+        // 简单起见直接休眠一段时间(repeatNum不要太大就行)
+        Thread.sleep(concurrentThreadNum * 10L);
+
+        assert (num[0] == concurrentThreadNum * repeatNum);
 
         System.out.println(num[0]);
+        executorService.shutdown();
     }
 }
