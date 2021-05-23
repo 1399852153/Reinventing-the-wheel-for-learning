@@ -25,9 +25,9 @@ public class MyAqsV1Test {
             executorService.execute(()-> {
                 for(int j=0; j<repeatNum; j++){
                     myReentrantLock.lock();
-                    System.out.println("doAdd thread=" + Thread.currentThread().getName() + " num=" + num[0]);
+//                    System.out.println("doAdd thread=" + Thread.currentThread().getName() + " num=" + num[0]);
                     num[0]++;
-                    System.out.println("doAdd over thread=" + Thread.currentThread().getName() + " num=" + num[0]);
+//                    System.out.println("doAdd over thread=" + Thread.currentThread().getName() + " num=" + num[0]);
                     myReentrantLock.unlock();
                 }
             });
@@ -36,9 +36,11 @@ public class MyAqsV1Test {
         // 简单起见直接休眠一段时间(repeatNum不要太大就行)
         Thread.sleep(concurrentThreadNum * 10L);
 
-        assert (num[0] == concurrentThreadNum * repeatNum);
+        System.out.println("" + num[0] + " concurrentThreadNum * repeatNum=" + concurrentThreadNum * repeatNum);
+        if(num[0] != concurrentThreadNum * repeatNum){
+            throw new RuntimeException("并发add存在问题");
+        }
 
-        System.out.println(num[0]);
         executorService.shutdown();
     }
 }
