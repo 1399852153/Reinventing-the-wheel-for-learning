@@ -16,7 +16,7 @@ public class MyAqsV1Test {
     }
 
     private static void testConcurrentAdd(int concurrentThreadNum,int repeatNum) throws InterruptedException {
-        MyReentrantLock myReentrantLock = new MyReentrantLock(false);
+        MyReentrantLock myReentrantLock = new MyReentrantLock(true);
 
         final int[] num = {0};
         ExecutorService executorService = Executors.newFixedThreadPool(concurrentThreadNum);
@@ -33,8 +33,8 @@ public class MyAqsV1Test {
             });
         }
 
-        // 简单起见直接休眠一段时间(repeatNum不要太大就行)
-        Thread.sleep(concurrentThreadNum * 10L);
+        // 简单起见直接休眠一段时间(repeatNum不要太大就行，待优化为countDownLatch)
+        Thread.sleep(concurrentThreadNum * 100L);
 
         System.out.println("" + num[0] + " concurrentThreadNum * repeatNum=" + concurrentThreadNum * repeatNum);
         if(num[0] != concurrentThreadNum * repeatNum){

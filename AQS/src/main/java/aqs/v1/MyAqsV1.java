@@ -123,10 +123,10 @@ public abstract class MyAqsV1 {
         if(secondNode != null){
             if(secondNode.thread == Thread.currentThread()){
                 // 头节点存在后继节点，且就是当前线程，因此不需要排队
-                return true;
+                return false;
             }else{
                 // 头节点存在后继节点，但不是当前线程，因此需要排队
-                return false;
+                return true;
             }
         }else{
             // tail != head，但是头节点却没有next节点，这是一种特殊的场景
