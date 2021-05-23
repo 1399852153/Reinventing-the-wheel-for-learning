@@ -2,6 +2,7 @@ package aqs.v1;
 
 import sun.misc.Unsafe;
 
+import java.lang.reflect.Field;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -18,13 +19,17 @@ public abstract class MyAqsV1 {
     private transient volatile Node tail;
     private transient Thread exclusiveOwnerThread;
 
-    private static final Unsafe unsafe = Unsafe.getUnsafe();
+    private static final Unsafe unsafe;
     private static final long stateOffset;
     private static final long headOffset;
     private static final long tailOffset;
 
     static {
         try {
+            Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+            getUnsafe.setAccessible(true);
+            unsafe = (Unsafe) getUnsafe.get(null);
+
             stateOffset = unsafe.objectFieldOffset(MyAqsV1.class.getDeclaredField("state"));
             headOffset = unsafe.objectFieldOffset(MyAqsV1.class.getDeclaredField("head"));
             tailOffset = unsafe.objectFieldOffset(MyAqsV1.class.getDeclaredField("tail"));
@@ -81,7 +86,10 @@ public abstract class MyAqsV1 {
             Node h = this.head;
             if (h != null) {
                 // 如果头节点存在，唤醒当前头节点的next节点对应的线程
-                LockSupport.unpark(h.next.thread);
+                Node next = h.next;
+                if(next != null){
+                    LockSupport.unpark(next.thread);
+                }
             }
             return true;
         }

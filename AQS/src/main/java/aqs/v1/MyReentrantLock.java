@@ -72,7 +72,6 @@ public class MyReentrantLock {
     }
 
     static final class NonfairSync extends Sync {
-        private static final long serialVersionUID = 7316153563782823691L;
 
         /**
          * Performs lock.  Try immediate barge, backing up to normal
@@ -91,8 +90,6 @@ public class MyReentrantLock {
     }
 
     static final class FairSync extends Sync {
-        private static final long serialVersionUID = -3000897897090466540L;
-
         final void lock() {
             acquire(1);
         }
