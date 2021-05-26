@@ -167,21 +167,21 @@ public abstract class MyAqsV1 {
         Node pred = tail;
         if (pred != null) {
             node.prev = pred;
-            // 当队列不为空时，执行一次快速的入队操作（用于非公平的锁机制，可以增加aqs的吞吐量）
+            // 当队列不为空时，执行一次快速的入队操作（因为少了一次enq方法调用，会快一点？）
             if (compareAndSetTail(pred, node)) {
                 // 快速入队成功，直接返回
                 pred.next = node;
                 return node;
             }
         }
-        // 上面的快速入队操作失败了，使用enq方法入队
+        // 上面的快速入队操作失败了，使用enq循环cas直到入队（队列为空，利用enq方法初始化同步队列）
         enq(node);
         return node;
     }
 
     /**
      * 入队操作
-     * 使用CAS操作+无限重试的方式来防止并发问题
+     * 使用CAS操作+无限重试的方式来解决并发冲突的问题
      * @return 返回新的队尾节点
      * */
     private Node enq(final Node node) {
