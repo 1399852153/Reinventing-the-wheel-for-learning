@@ -1,6 +1,6 @@
 package aqs.v1.test;
 
-import aqs.v1.MyReentrantLock;
+import aqs.v1.MyReentrantLockV1;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,7 +16,7 @@ public class MyAqsV1Test {
     }
 
     private static void testConcurrentAdd(int concurrentThreadNum,int repeatNum) throws InterruptedException {
-        MyReentrantLock myReentrantLock = new MyReentrantLock(true);
+        MyReentrantLockV1 myReentrantLock = new MyReentrantLockV1(true);
 
         final int[] num = {0};
         ExecutorService executorService = Executors.newFixedThreadPool(concurrentThreadNum);

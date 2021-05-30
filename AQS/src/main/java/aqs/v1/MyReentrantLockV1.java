@@ -6,11 +6,11 @@ package aqs.v1;
  *
  * 将jdk的ReentrantLock中的aqs改成MyAqsV1
  */
-public class MyReentrantLock {
+public class MyReentrantLockV1 {
 
-    private final MyReentrantLock.Sync sync;
+    private final MyReentrantLockV1.Sync sync;
 
-    public MyReentrantLock(boolean fair) {
+    public MyReentrantLockV1(boolean fair) {
         sync = fair ? new FairSync() : new NonfairSync();
     }
 
