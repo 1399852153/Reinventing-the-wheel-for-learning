@@ -11,28 +11,34 @@ import java.util.concurrent.Executors;
  */
 public class MyAqsV2Test {
 
+    /**
+     * 令某一线程（主线程）等待其它线程执行完任务后再被唤醒
+     * */
     public static void main(String[] args) throws InterruptedException {
-
-        MyCountDownLatch myCountDownLatch = new MyCountDownLatch(1);
-
         int concurrentNum = 10;
+
+        MyCountDownLatch myCountDownLatch = new MyCountDownLatch(concurrentNum);
+
         ExecutorService executorService = Executors.newFixedThreadPool(concurrentNum);
         for(int i=0; i<concurrentNum; i++) {
             executorService.submit(() -> {
-                System.out.println("准备就绪 预备" + "thread=" + Thread.currentThread().getName());
+                System.out.println("doSomething" + " thread=" + Thread.currentThread().getName());
                 try {
-                    myCountDownLatch.await();
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
 
-                System.out.println("出发！！！" + "thread=" + Thread.currentThread().getName());
+                System.out.println("doSomething finish" + " thread=" + Thread.currentThread().getName());
+                myCountDownLatch.countDown();
             });
         }
 
-        Thread.sleep(3000);
-        myCountDownLatch.countDown();
-        System.out.println("发车完毕");
+        System.out.println("等待分支任务执行完毕");
+        myCountDownLatch.await();
+        System.out.println("分支任务执行完毕,主线程继续执行");
         executorService.shutdown();
     }
+
+
 }

@@ -173,9 +173,9 @@ public abstract class MyAqsV2 {
         Node h = head;
         setHead(node);
 
-        if (propagate > 0 || h == null || (h = head) == null) {
+        if (propagate > 0 || h == null) {
             Node s = node.next;
-            if (s == null || s.isShared()) {
+            if (s != null && s.isShared()) {
                 doReleaseShared();
             }
         }
