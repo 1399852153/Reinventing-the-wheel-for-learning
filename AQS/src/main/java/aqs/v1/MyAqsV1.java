@@ -1,5 +1,6 @@
 package aqs.v1;
 
+import aqs.MyAqs;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
@@ -12,7 +13,7 @@ import java.util.concurrent.locks.LockSupport;
  * 自己实现的aqs，v1版本
  * 只支持互斥锁模式（无法处理被阻塞线程发生被中断）
  */
-public abstract class MyAqsV1 {
+public abstract class MyAqsV1 implements MyAqs {
 
     private volatile int state;
     private transient volatile Node head;
@@ -64,6 +65,7 @@ public abstract class MyAqsV1 {
     /**
      * 尝试加互斥锁，如果加锁失败则当前线程进入阻塞状态
      * */
+    @Override
     public final void acquire(int arg) {
         // 尝试着去申请互斥锁
         boolean acquireResult = tryAcquire(arg);
@@ -79,6 +81,7 @@ public abstract class MyAqsV1 {
      * 尝试着释放互斥锁
      * @return true：释放成功；false：释放失败
      * */
+    @Override
     public final boolean release(int arg) {
         // 尝试着释放锁
         if (tryRelease(arg)) {
@@ -96,19 +99,7 @@ public abstract class MyAqsV1 {
         return false;
     }
 
-    /**
-     * 判断当前aqs队列是否已经有至少一个线程处于等待状态，该方法主要用于实现公平锁/非公平锁
-     * 在执行aqs的acquire入队时，会令新申请锁的线程进行一次征用锁的操作（acquireQueued方法中的tryAcquire）
-     * 这使得新申请锁的线程能够和之前已经在同步队列中等待的线程一起竞争锁，新申请锁的线程有可能比更早申请锁的线程先获得锁（非公平机制）
-     *
-     * 非公平的锁机制由于利用了cas操作进行充分的竞争，其性能高于公平的锁机制（按照实际申请锁的顺序来得到锁，会产生更多的线程上下文切换），
-     * 缺点是在高并发场景下先入队的线程容易陷入饥饿状态（前面先进入等待的线程迟迟拿不到锁）
-     *
-     * 使用aqs实现公平锁机制的最佳实践是在tryAcquire中使用hasQueuedPredecessors进行判断，
-     * 如果返回ture，说明同步队列中还存在更早进入等待锁的线程，因此tryAcquire返回false，令当前线程进入队尾等待，不去抢先获得锁，以实现公平的特性
-     *
-     * @return false说明不需要排队，true说明需要排队
-     * */
+    @Override
     public final boolean hasQueuedPredecessors() {
         Node t = tail;
         Node h = head;
