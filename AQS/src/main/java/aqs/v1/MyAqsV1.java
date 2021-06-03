@@ -66,7 +66,7 @@ public abstract class MyAqsV1 implements MyAqs {
      * 尝试加互斥锁，如果加锁失败则当前线程进入阻塞状态
      * */
     @Override
-    public final void acquire(int arg) {
+    public final boolean acquire(int arg) {
         // 尝试着去申请互斥锁
         boolean acquireResult = tryAcquire(arg);
         if(!acquireResult){
@@ -75,6 +75,9 @@ public abstract class MyAqsV1 implements MyAqs {
             // 尝试着加入同步队列
             acquireQueued(newWaiterNode,arg);
         }
+
+        // 不支持中断功能，返回false
+        return false;
     }
 
     /**

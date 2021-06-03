@@ -8,9 +8,26 @@ package aqs;
  */
 public interface MyAqs {
 
-    void acquire(int arg);
+    default boolean acquire(int arg) throws InterruptedException {
+        throw new UnsupportedOperationException();
+    }
 
-    boolean release(int arg);
+    default void acquireInterruptibly(int arg) throws InterruptedException {
+        throw new UnsupportedOperationException();
+    }
+
+    default boolean release(int arg) {
+        throw new UnsupportedOperationException();
+    }
+
+    default void acquireShared(int arg){
+        throw new UnsupportedOperationException();
+    }
+
+    default boolean releaseShared(int arg){
+        throw new UnsupportedOperationException();
+    }
+
 
     /**
      * 判断当前aqs队列是否已经有至少一个线程处于等待状态，该方法主要用于实现公平锁/非公平锁
@@ -27,12 +44,5 @@ public interface MyAqs {
      * */
     boolean hasQueuedPredecessors();
 
-    default void acquireShared(int arg){
-        throw new UnsupportedOperationException();
-    }
-
-    default boolean releaseShared(int arg){
-        throw new UnsupportedOperationException();
-    }
 
 }

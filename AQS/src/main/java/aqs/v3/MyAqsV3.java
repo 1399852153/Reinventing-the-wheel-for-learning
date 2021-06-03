@@ -1,19 +1,21 @@
-package aqs.v2;
+package aqs.v3;
 
 import aqs.MyAqs;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
+import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 import java.util.concurrent.locks.LockSupport;
 
 /**
  * @author xiongyx
  * @date 2021/5/22
  *
- * 自己实现的aqs，v2版本
- * 支持互斥模式、共享模式（无法处理被阻塞线程发生被中断）
+ * 自己实现的aqs，v3版本
+ * 1.支持互斥模式、共享模式
+ * 2.支持被阻塞线程发生被中断或加锁超时而取消排队
  */
-public abstract class MyAqsV2 implements MyAqs {
+public abstract class MyAqsV3 implements MyAqs {
 
     private volatile int state;
     private transient volatile Node head;
@@ -25,15 +27,22 @@ public abstract class MyAqsV2 implements MyAqs {
     private static final long headOffset;
     private static final long tailOffset;
 
+    private static final long waitStatusOffset;
+    private static final long nextOffset;
+
     static {
         try {
             Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
             getUnsafe.setAccessible(true);
             unsafe = (Unsafe) getUnsafe.get(null);
 
-            stateOffset = unsafe.objectFieldOffset(MyAqsV2.class.getDeclaredField("state"));
-            headOffset = unsafe.objectFieldOffset(MyAqsV2.class.getDeclaredField("head"));
-            tailOffset = unsafe.objectFieldOffset(MyAqsV2.class.getDeclaredField("tail"));
+            stateOffset = unsafe.objectFieldOffset(MyAqsV3.class.getDeclaredField("state"));
+            headOffset = unsafe.objectFieldOffset(MyAqsV3.class.getDeclaredField("head"));
+            tailOffset = unsafe.objectFieldOffset(MyAqsV3.class.getDeclaredField("tail"));
+
+            waitStatusOffset = unsafe.objectFieldOffset(Node.class.getDeclaredField("waitStatus"));
+            nextOffset = unsafe.objectFieldOffset(Node.class.getDeclaredField("next"));
+
         } catch (Exception var1) {
             throw new Error(var1);
         }
@@ -73,11 +82,21 @@ public abstract class MyAqsV2 implements MyAqs {
             // 申请互斥锁失败，新创建一个绑定当前线程的节点
             Node newWaiterNode = addWaiter(Node.EXCLUSIVE_MODE);
             // 尝试着加入同步队列
-            acquireQueued(newWaiterNode,arg);
+            return acquireQueued(newWaiterNode,arg);
         }
 
-        // 不支持中断功能，返回false
+        // 默认不是被中断打断的
         return false;
+    }
+
+    @Override
+    public final void acquireInterruptibly(int arg) throws InterruptedException {
+        if (Thread.interrupted()) {
+            throw new InterruptedException();
+        }
+        if (!tryAcquire(arg)) {
+            doAcquireInterruptibly(arg);
+        }
     }
 
     /**
@@ -196,6 +215,13 @@ public abstract class MyAqsV2 implements MyAqs {
         }
     }
 
+    /**
+     * node对应线程取消排队，将节点从队列中移除
+     * */
+    private void cancelAcquire(Node node) {
+       // todo cancelAcquire
+    }
+
     private void unparkSuccessor(Node node) {
         Node next = node.next;
         if(next != null){
@@ -206,21 +232,105 @@ public abstract class MyAqsV2 implements MyAqs {
     /**
      * 尝试着加入队列
      * */
-    private void acquireQueued(final Node node, int arg) {
-        for (; ; ) {
-            final Node p = node.prev;
-            // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
-            if (p == head && tryAcquire(arg)) {
-                // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
-                // 令当前入队的节点成为aqs中新的head节点
-                setHead(node);
-                p.next = null; // help GC
-                return;
-            }else{
-                // 阻塞当前线程
-                LockSupport.park(this);
+    private boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (; ; ) {
+                final Node p = node.prev;
+                // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+                if (p == head && tryAcquire(arg)) {
+                    // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
+                    // 令当前入队的节点成为aqs中新的head节点
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }else{
+                    // 阻塞当前线程
+                    LockSupport.park(this);
+                    if (shouldParkAfterFailedAcquire(p, node)){
+                        // 将当前线程阻塞
+                        LockSupport.park(this);
+                        if(Thread.interrupted()){
+                            // 是被中断唤醒的,但是acquire=>acquireQueued是不可被中断的
+                            // 意味着，即使被中断唤醒了，还是需要继续尝试着争用锁。
+                            // 返回值interrupted为true标识着争用锁的过程中是发生了中断的
+                            interrupted = true;
+                        }
+                    }
+                }
+            }
+        }finally {
+            if (failed) {
+                // 发生异常导致入队失败
+                cancelAcquire(node);
             }
         }
+    }
+
+    /**
+     * 可被中断的获取互斥锁
+     * */
+    private void doAcquireInterruptibly(int arg) throws InterruptedException {
+        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.prev;
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return;
+                }
+                if (shouldParkAfterFailedAcquire(p, node)){
+                    // 将当前线程阻塞
+                    LockSupport.park(this);
+                    // 被唤醒后检查是否是由于被中断而唤醒的
+                    if(Thread.interrupted()){
+                        // 是被中断唤醒的，抛出中断异常（这就是可被中断，因为被中断后会抛异常不再尝试入队了，可以和acquireQueued做比较）
+                        // 同时finally中会将当前线程对应的Node设置为cancel
+                        throw new InterruptedException();
+                    }
+                }
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+
+    private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+        int ws = pred.waitStatus;
+        if (ws == Node.SIGNAL) {
+            return true;
+        }
+
+        if (ws > 0) {
+            do {
+                node.prev = pred.prev;
+                pred = pred.prev;
+                // waitStatus = CANCELLED
+                // 前驱节点是取消状态，直到找到一个不是处于取消状态的节点（无论如何head节点永远不会是取消状态，所以一定能退出循环）
+                // 在查找的过程中，将处于取消状态的节点从同步队列中断开（node.prev = pred.prev）
+            } while (pred.waitStatus > 0);
+            // 找到了一个不是CANCELLED的前驱节点，令其next指向当前节点node
+            pred.next = node;
+            // 在经过一系列prev和next的拓扑调整后，
+            // 在方法执行前同步队列中位于"参数node"和"与其距离最近的前驱节点"中处于CANCELLED状态的节点已经全部被移出了队列
+        } else {
+            /*
+             * waitStatus must be 0 or PROPAGATE.  Indicate that we
+             * need a signal, but don't park yet.  Caller will need to
+             * retry to make sure it cannot acquire before parking.
+             */
+            // 如果pred节点的watiStatus不是CANCELLED，也不是SIGNAL。需要将其设置为SIGNAL
+            // todo 待分析，什么时候会是这个场景
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+
+        return false;
     }
 
     private void setHead(Node node) {
@@ -306,12 +416,26 @@ public abstract class MyAqsV2 implements MyAqs {
      * 内部同步队列的节点
      * */
     static final class Node {
+        /**
+         * Node.mode常量 互斥/共享模式
+         * */
         static final int EXCLUSIVE_MODE = 0;
         static final int SHARED_MODE = 1;
+
+        /**
+         * Node.waitStatus常量
+         *
+         * CANCELLED： 因为被中断、超时等原因而取消排队的节点
+         * SIGNAL：当前节点的next节点正等待被唤醒
+         * */
+        static final int CANCELLED =  1;
+        static final int SIGNAL    = -1;
+
 
         volatile Node prev;
         volatile Node next;
         volatile Thread thread;
+        volatile int waitStatus;
 
         int mode;
 
@@ -337,5 +461,12 @@ public abstract class MyAqsV2 implements MyAqs {
     }
     private boolean compareAndSetTail(Node expect, Node update) {
         return unsafe.compareAndSwapObject(this, tailOffset, expect, update);
+    }
+
+    private static boolean compareAndSetWaitStatus(Node node, int expect, int update) {
+        return unsafe.compareAndSwapInt(node, waitStatusOffset, expect, update);
+    }
+    private static boolean compareAndSetNext(Node node, Node expect, Node update) {
+        return unsafe.compareAndSwapObject(node, nextOffset, expect, update);
     }
 }
