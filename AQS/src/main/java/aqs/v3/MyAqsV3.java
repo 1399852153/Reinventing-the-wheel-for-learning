@@ -30,6 +30,8 @@ public abstract class MyAqsV3 implements MyAqs {
     private static final long waitStatusOffset;
     private static final long nextOffset;
 
+    static final long spinForTimeoutThreshold = 1000L;
+
     static {
         try {
             Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
@@ -96,6 +98,20 @@ public abstract class MyAqsV3 implements MyAqs {
         }
         if (!tryAcquire(arg)) {
             doAcquireInterruptibly(arg);
+        }
+    }
+
+    @Override
+    public final boolean tryAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
+        if (Thread.interrupted()) {
+            throw new InterruptedException();
+        }
+
+        // Returns: true if acquired; false if timed out
+        if(tryAcquire(arg)){
+            return true;
+        }else{
+            return doAcquireNanos(arg,nanosTimeout);
         }
     }
 
@@ -301,9 +317,56 @@ public abstract class MyAqsV3 implements MyAqs {
         }
     }
 
+    private boolean doAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
+        if (nanosTimeout <= 0L) {
+            // 超时时间不为正数，直接超时加锁失败
+            return false;
+        }
+
+        final long deadline = System.nanoTime() + nanosTimeout;
+        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.prev;
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return true;
+                }
+                // 尝试加锁失败
+                nanosTimeout = deadline - System.nanoTime();
+                if (nanosTimeout <= 0L) {
+                    // 当前已经超时，加锁失败返回false
+                    return false;
+                }
+                if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold) {
+                    // 将当前线程阻塞nanosTimeout毫秒
+                    LockSupport.parkNanos(this, nanosTimeout);
+                    // 被唤醒有三种可能:
+                    // 1. parkNanos超时时间已到被唤醒 => 在循环中尝试最后一次入队后（p == head && tryAcquire）,
+                    // 如果失败则会进入的if（nanosTimeout <= 0L）分支，返回false
+                    // 2. 被自己的前驱节点唤醒 => 尝试一次入队
+                    // 3. 被中断唤醒，进入的if（Thread.interrupted()分支，抛出中断异常
+                }
+                if (Thread.interrupted()) {
+                    throw new InterruptedException();
+                }
+            }
+        } finally {
+            if (failed) {
+                cancelAcquire(node);
+            }
+        }
+    }
+
+
     private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
         int ws = pred.waitStatus;
         if (ws == Node.SIGNAL) {
+            // 在当前节点对应线程park阻塞前，保证前驱节点的状态为SIGNAL
+            // 确保node对应的线程在前驱节点释放锁时能最终能将其正确的唤醒
             return true;
         }
 

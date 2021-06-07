@@ -16,6 +16,13 @@ public interface MyAqs {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * @return true if acquired; false if timed out
+     * */
+    default boolean tryAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
+        throw new UnsupportedOperationException();
+    }
+
     default boolean release(int arg) {
         throw new UnsupportedOperationException();
     }
