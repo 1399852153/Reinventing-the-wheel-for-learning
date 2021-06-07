@@ -8,29 +8,64 @@ package aqs;
  */
 public interface MyAqs {
 
+    /**
+     * 尝试获取互斥锁（不可中断）
+     * 如果加锁过程线程被中断，不会退出加锁过程，但会返回true
+     * @return true加锁过程中发生了中断；false加锁过程中未发生中断
+     * */
     default boolean acquire(int arg) throws InterruptedException {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * 尝试获取互斥锁（可中断）
+     * 如果加锁过程线程被中断，会立即退出aqs并抛出中断异常
+     * */
     default void acquireInterruptibly(int arg) throws InterruptedException {
         throw new UnsupportedOperationException();
     }
 
     /**
+     * 尝试获取互斥锁，引入超时机制
      * @return true if acquired; false if timed out
      * */
     default boolean tryAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * 释放互斥锁
+     * */
     default boolean release(int arg) {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * 尝试获取共享锁
+     * */
     default void acquireShared(int arg){
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * 尝试获取共享锁（可中断）
+     * 如果加锁过程线程被中断，会立即退出aqs并抛出中断异常
+     * */
+    default void acquireSharedInterruptibly(int arg) throws InterruptedException{
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * 尝试获取共享锁，引入超时机制
+     * @return true if acquired; false if timed out
+     * */
+    default boolean tryAcquireSharedNanos(int arg, long nanosTimeout) throws InterruptedException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * 释放共享锁
+     * */
     default boolean releaseShared(int arg){
         throw new UnsupportedOperationException();
     }

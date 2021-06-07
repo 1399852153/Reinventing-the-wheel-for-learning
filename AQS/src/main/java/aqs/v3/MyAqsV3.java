@@ -134,13 +134,20 @@ public abstract class MyAqsV3 implements MyAqs {
         return false;
     }
 
-    /**
-     * 尝试获取共享锁
-     * */
     @Override
     public final void acquireShared(int arg) {
         if (tryAcquireShared(arg) < 0) {
             doAcquireShared(arg);
+        }
+    }
+
+    public final void acquireSharedInterruptibly(int arg)
+            throws InterruptedException {
+        if (Thread.interrupted()) {
+            throw new InterruptedException();
+        }
+        if (tryAcquireShared(arg) < 0) {
+            doAcquireSharedInterruptibly(arg);
         }
     }
 
@@ -201,7 +208,38 @@ public abstract class MyAqsV3 implements MyAqs {
             // 前驱节点不是头节点，或者共享锁获取失败，阻塞当前线程
             LockSupport.park(this);
         }
+    }
 
+    private void doAcquireSharedInterruptibly(int arg) throws InterruptedException {
+        final Node node = addWaiter(Node.SHARED_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.prev;
+                if (p == head) {
+                    int r = tryAcquireShared(arg);
+                    if (r >= 0) {
+                        setHeadAndPropagate(node, r);
+                        p.next = null; // help GC
+                        failed = false;
+                        return;
+                    }
+                }
+                if (shouldParkAfterFailedAcquire(p, node)){
+                    // 将当前线程阻塞
+                    LockSupport.park(this);
+                    // 被唤醒后检查是否是由于被中断而唤醒的
+                    if(Thread.interrupted()){
+                        // 是被中断唤醒的，抛出中断异常（这就是可被中断，因为被中断后会抛异常不再尝试入队了，可以和acquireQueued做比较）
+                        // 同时finally中会将当前线程对应的Node设置为cancel
+                        throw new InterruptedException();
+                    }
+                }
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
     }
 
     private void setHeadAndPropagate(Node node, int propagate) {

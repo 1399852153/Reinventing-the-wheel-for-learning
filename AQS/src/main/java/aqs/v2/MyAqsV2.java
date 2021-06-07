@@ -99,9 +99,6 @@ public abstract class MyAqsV2 implements MyAqs {
         return false;
     }
 
-    /**
-     * 尝试获取共享锁
-     * */
     @Override
     public final void acquireShared(int arg) {
         if (tryAcquireShared(arg) < 0) {
