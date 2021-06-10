@@ -83,8 +83,13 @@ public abstract class MyAqsV3 implements MyAqs {
         if(!acquireResult){
             // 申请互斥锁失败，新创建一个绑定当前线程的节点
             Node newWaiterNode = addWaiter(Node.EXCLUSIVE_MODE);
+
+            boolean interrupted = acquireQueued(newWaiterNode,arg);
+            if(interrupted){
+                selfInterrupt();
+            }
             // 尝试着加入同步队列
-            return acquireQueued(newWaiterNode,arg);
+            return interrupted;
         }
 
         // 默认不是被中断打断的
@@ -141,6 +146,7 @@ public abstract class MyAqsV3 implements MyAqs {
         }
     }
 
+    @Override
     public final void acquireSharedInterruptibly(int arg)
             throws InterruptedException {
         if (Thread.interrupted()) {
@@ -148,6 +154,19 @@ public abstract class MyAqsV3 implements MyAqs {
         }
         if (tryAcquireShared(arg) < 0) {
             doAcquireSharedInterruptibly(arg);
+        }
+    }
+
+    @Override
+    public final boolean tryAcquireSharedNanos(int arg, long nanosTimeout) throws InterruptedException {
+        if (Thread.interrupted()) {
+            throw new InterruptedException();
+        }
+
+        if(tryAcquireShared(arg) >= 0){
+            return true;
+        }else{
+            return doAcquireSharedNanos(arg, nanosTimeout);
         }
     }
 
@@ -194,19 +213,40 @@ public abstract class MyAqsV3 implements MyAqs {
 
     private void doAcquireShared(int arg) {
         final Node node = addWaiter(Node.SHARED_MODE);
-        for (;;) {
-            final Node p = node.prev;
-            if (p == head) {
-                int r = tryAcquireShared(arg);
-                if (r >= 0) {
-                    setHeadAndPropagate(node, r);
-                    p.next = null; // help GC
-                    return;
+        boolean failed = true;
+
+        try {
+            boolean interrupted = false;
+
+            for (; ; ) {
+                final Node p = node.prev;
+                if (p == head) {
+                    int r = tryAcquireShared(arg);
+                    if (r >= 0) {
+                        setHeadAndPropagate(node, r);
+                        p.next = null; // help GC
+                        if (interrupted) {
+                            selfInterrupt();
+                        }
+                        failed = false;
+                        return;
+                    }
+                }
+
+                if (shouldParkAfterFailedAcquire(p, node)){
+                    // 将当前线程阻塞
+                    LockSupport.park(this);
+                    // 被唤醒后检查是否是由于被中断而唤醒的
+                    if(Thread.interrupted()){
+                        // 是被中断唤醒的
+                        interrupted = true;
+                    }
                 }
             }
-
-            // 前驱节点不是头节点，或者共享锁获取失败，阻塞当前线程
-            LockSupport.park(this);
+        }finally {
+            if (failed) {
+                cancelAcquire(node);
+            }
         }
     }
 
@@ -237,8 +277,58 @@ public abstract class MyAqsV3 implements MyAqs {
                 }
             }
         } finally {
-            if (failed)
+            if (failed) {
                 cancelAcquire(node);
+            }
+        }
+    }
+
+    private boolean doAcquireSharedNanos(int arg, long nanosTimeout)
+            throws InterruptedException {
+        if (nanosTimeout <= 0L) {
+            // 超时时间不为正数，直接超时加锁失败
+            return false;
+        }
+
+        final long deadline = System.nanoTime() + nanosTimeout;
+        final Node node = addWaiter(Node.SHARED_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.prev;
+                if (p == head) {
+                    int r = tryAcquireShared(arg);
+                    if (r >= 0) {
+                        setHeadAndPropagate(node, r);
+                        p.next = null; // help GC
+                        failed = false;
+                        return true;
+                    }
+                }
+
+                // 尝试加锁失败
+                nanosTimeout = deadline - System.nanoTime();
+                if (nanosTimeout <= 0L) {
+                    // 当前已经超时，加锁失败返回false
+                    return false;
+                }
+                if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold) {
+                    // 将当前线程阻塞nanosTimeout毫秒
+                    LockSupport.parkNanos(this, nanosTimeout);
+                    // 被唤醒有三种可能:
+                    // 1. parkNanos超时时间已到被唤醒 => 在循环中尝试最后一次入队后（p == head && tryAcquire）,
+                    // 如果失败则会进入的if（nanosTimeout <= 0L）分支，返回false
+                    // 2. 被自己的前驱节点唤醒 => 尝试一次入队
+                    // 3. 被中断唤醒，进入的if（Thread.interrupted()分支，抛出中断异常
+                }
+                if (Thread.interrupted()) {
+                    throw new InterruptedException();
+                }
+            }
+        } finally {
+            if (failed) {
+                cancelAcquire(node);
+            }
         }
     }
 
@@ -270,16 +360,95 @@ public abstract class MyAqsV3 implements MyAqs {
     }
 
     /**
-     * node对应线程取消排队，将节点从队列中移除
+     * node对应线程取消排队，将参数node节点从同步队列中移除
      * */
     private void cancelAcquire(Node node) {
-       // todo cancelAcquire
+        if (node == null) {
+            return;
+        }
+
+        node.thread = null;
+
+        Node pred = node.prev;
+        while (pred.waitStatus > 0) {
+            // 循环往复，向前查询直到找到一个不处于CANCELLED状态的前驱节点
+            node.prev = pred.prev;
+            pred = pred.prev;
+        }
+
+        // 获得当前前驱节点的next节点（next节点引用在无锁cas的竞争条件下可能为null）
+        Node predNext = pred.next;
+
+        // 将当前节点状态设置为CANCELLED（由于CANCELLED是终态，所以没有使用compareAndSetWaitStatus，可以略微提高效率）
+        node.waitStatus = Node.CANCELLED;
+
+        // 如果当前节点是尾节点，cas的将自己的的前驱pred节点设置为新的尾节点
+        // compareAndSetTail设置tail节点时，会和其它执行enq的线程产生冲突而失败（enq中的compareAndSetTail）
+        if (node == tail && compareAndSetTail(node, pred)) {
+            // cas的设置前驱节点的next为null（因为前驱已经是队尾节点了，所以其next应该为null）
+            // compareAndSetNext设置next引用时，会和其它执行enq的线程产生冲突而失败（enq中的currentTailNode.next = node）
+            // 但即使失败了也是正常的（不用重试），因为新的队尾节点已经建立，当前的pred节点已经不是队尾节点了
+            compareAndSetNext(pred, predNext, null);
+        }else{
+            // node不是尾节点；或者compareAndSetTail失败，pred也不是尾节点了
+            // If successor needs signal, try to set pred's next-link
+            // so it will get one. Otherwise wake it up to propagate.
+            int ws;
+            if (pred != head &&
+                    // 和shouldParkAfterFailedAcquire的场景类似
+                ((ws = pred.waitStatus) == Node.SIGNAL || (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) &&
+                    pred.thread != null) {
+                // node的前驱不是head（node位于队列的中间，其pred非头节点自身也非尾节点），且pred节点的waitStatus为SIGNAL
+                Node next = node.next;
+                if (next != null && next.waitStatus <= 0) {
+                    // next不是CANCELLED状态，令pred.next = node.next(即在next的链条上，将node摘除)
+                    compareAndSetNext(pred, predNext, next);
+                }
+            } else {
+                // node的前驱是head
+                unparkSuccessor(node);
+            }
+
+            // 令next指向自己，断开next节点与自己的连结，便于GC
+            // 执行了cancelAcquire操作的节点，会被其它线程在执行shouldParkAfterFailedAcquire时从队列中摘除掉
+            node.next = node; // help GC
+        }
     }
 
     private void unparkSuccessor(Node node) {
-        Node next = node.next;
-        if(next != null){
-            LockSupport.unpark(next.thread);
+        /*
+         * If status is negative (i.e., possibly needing signal) try
+         * to clear in anticipation of signalling.  It is OK if this
+         * fails or if status is changed by waiting thread.
+         */
+        int ws = node.waitStatus;
+        if (ws < 0){
+            // 当前节点如果状态不是终态CANCELLED或0，将状态设置为0，避免后续重复的被唤醒（node.waitStatus小于0说明其next需要被唤醒）
+            compareAndSetWaitStatus(node, ws, 0);
+        }
+
+        /*
+         * Thread to unpark is held in successor, which is normally
+         * just the next node.  But if cancelled or apparently null,
+         * traverse backwards from tail to find the actual
+         * non-cancelled successor.
+         */
+
+        // 先尝试通过next引用找到node的next节点
+        Node s = node.next;
+        if (s == null || s.waitStatus > 0) {
+            // 但由于其next节点可能处于CANCELLED状态或是由于cas的并发而不存在（cas同步队列中只有prev是准确的，一定存在的；next只是一个优化）
+            s = null;
+            for (Node t = tail; t != null && t != node; t = t.prev) {
+                // 因此从队列的尾部开始根据prev引用向前寻找，直到找到一个不为CANCELLED状态的节点，即为node节点实际上的next节点
+                if (t.waitStatus <= 0) {
+                    s = t;
+                }
+            }
+        }
+        if (s != null) {
+            // 如果找到了next后继节点，将其对应的线程唤醒
+            LockSupport.unpark(s.thread);
         }
     }
 
@@ -412,7 +581,7 @@ public abstract class MyAqsV3 implements MyAqs {
             do {
                 node.prev = pred.prev;
                 pred = pred.prev;
-                // waitStatus = CANCELLED
+                // waitStatus = CANCELLED（执行cancelAcquire导致的）
                 // 前驱节点是取消状态，直到找到一个不是处于取消状态的节点（无论如何head节点永远不会是取消状态，所以一定能退出循环）
                 // 在查找的过程中，将处于取消状态的节点从同步队列中断开（node.prev = pred.prev）
             } while (pred.waitStatus > 0);
@@ -485,6 +654,10 @@ public abstract class MyAqsV3 implements MyAqs {
                 // compareAndSetTail执行失败的线程会进入新的循环，反复尝试compareAndSetTail的cas操作直到最终成功
             }
         }
+    }
+
+    static void selfInterrupt() {
+        Thread.currentThread().interrupt();
     }
 
     /**
