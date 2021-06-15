@@ -1,6 +1,7 @@
 package aqs.v2;
 
 import aqs.MyAqs;
+import aqs.v1.MyAqsV1;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
@@ -150,7 +151,7 @@ public abstract class MyAqsV2 implements MyAqs {
     private void doAcquireShared(int arg) {
         final Node node = addWaiter(Node.SHARED_MODE);
         for (;;) {
-            final Node p = node.prev;
+            final Node p = node.predecessor();
             if (p == head) {
                 int r = tryAcquireShared(arg);
                 if (r >= 0) {
@@ -205,7 +206,7 @@ public abstract class MyAqsV2 implements MyAqs {
      * */
     private void acquireQueued(final Node node, int arg) {
         for (; ; ) {
-            final Node p = node.prev;
+            final Node p = node.predecessor();
             // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
             if (p == head && tryAcquire(arg)) {
                 // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
@@ -326,6 +327,16 @@ public abstract class MyAqsV2 implements MyAqs {
 
         boolean isShared(){
             return mode == SHARED_MODE;
+        }
+
+        final Node predecessor() throws NullPointerException {
+            Node p = prev;
+            if (p == null) {
+                throw new NullPointerException();
+            }
+            else {
+                return p;
+            }
         }
     }
 

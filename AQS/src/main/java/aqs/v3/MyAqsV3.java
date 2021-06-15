@@ -86,7 +86,9 @@ public abstract class MyAqsV3 implements MyAqs {
 
             boolean interrupted = acquireQueued(newWaiterNode,arg);
             if(interrupted){
-                selfInterrupt();
+                // 如果加锁过程中确实发生过了中断，但acquireQueued内部Thread.interrupted将中断标识清楚了
+                // 在这里调用interrupt，重新补偿中断标识
+                Thread.currentThread().interrupt();
             }
             // 尝试着加入同步队列
             return interrupted;
@@ -130,7 +132,7 @@ public abstract class MyAqsV3 implements MyAqs {
         if (tryRelease(arg)) {
             // 成功释放
             Node h = this.head;
-            if (h != null) {
+            if (h != null && h.waitStatus != 0) {
                 // 如果头节点存在，唤醒当前头节点的next节点对应的线程
                 unparkSuccessor(h);
             }
@@ -211,6 +213,122 @@ public abstract class MyAqsV3 implements MyAqs {
         }
     }
 
+    /**
+     * 尝试着加入队列
+     * */
+    private boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (; ; ) {
+                final Node p = node.predecessor();
+                // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+                if (p == head && tryAcquire(arg)) {
+                    // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
+                    // 令当前入队的节点成为aqs中新的head节点
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }else{
+                    // 不是aqs头节点的next节点或者node是aqs头节点的next节点但tryAcquire获取锁失败了（非公平锁，被后入队的线程抢占了）
+                    if (shouldParkAfterFailedAcquire(p, node)){
+                        // 将当前线程阻塞
+                        LockSupport.park(this);
+                        if(Thread.interrupted()){
+                            // 是被中断唤醒的,但是acquire=>acquireQueued是不可被中断的
+                            // 意味着，即使被中断唤醒了，还是需要继续尝试着争用锁。
+                            // 返回值interrupted为true标识着争用锁的过程中是发生了中断的
+                            interrupted = true;
+                        }
+                    }
+                }
+            }
+        }finally {
+            if (failed) {
+                // 发生异常导致入队失败
+                cancelAcquire(node);
+            }
+        }
+    }
+
+    /**
+     * 可被中断的获取互斥锁
+     * */
+    private void doAcquireInterruptibly(int arg) throws InterruptedException {
+        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.predecessor();
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return;
+                }
+                if (shouldParkAfterFailedAcquire(p, node)){
+                    // 将当前线程阻塞
+                    LockSupport.park(this);
+                    // 被唤醒后检查是否是由于被中断而唤醒的
+                    if(Thread.interrupted()){
+                        // 是被中断唤醒的，抛出中断异常（这就是可被中断，因为被中断后会抛异常不再尝试入队了，可以和acquireQueued做比较）
+                        // 同时finally中会将当前线程对应的Node设置为cancel
+                        throw new InterruptedException();
+                    }
+                }
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+
+    private boolean doAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
+        if (nanosTimeout <= 0L) {
+            // 超时时间不为正数，直接超时加锁失败
+            return false;
+        }
+
+        final long deadline = System.nanoTime() + nanosTimeout;
+        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
+        boolean failed = true;
+        try {
+            for (;;) {
+                final Node p = node.predecessor();
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return true;
+                }
+                // 尝试加锁失败
+                nanosTimeout = deadline - System.nanoTime();
+                if (nanosTimeout <= 0L) {
+                    // 当前已经超时，加锁失败返回false
+                    return false;
+                }
+                if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold) {
+                    // 将当前线程阻塞nanosTimeout毫秒
+                    LockSupport.parkNanos(this, nanosTimeout);
+                    // 被唤醒有三种可能:
+                    // 1. parkNanos超时时间已到被唤醒 => 在循环中尝试最后一次入队后（p == head && tryAcquire）,
+                    // 如果失败则会进入的if（nanosTimeout <= 0L）分支，返回false
+                    // 2. 被自己的前驱节点唤醒 => 尝试一次入队
+                    // 3. 被中断唤醒，进入的if（Thread.interrupted()分支，抛出中断异常
+                }
+                if (Thread.interrupted()) {
+                    throw new InterruptedException();
+                }
+            }
+        } finally {
+            if (failed) {
+                cancelAcquire(node);
+            }
+        }
+    }
+
+
     private void doAcquireShared(int arg) {
         final Node node = addWaiter(Node.SHARED_MODE);
         boolean failed = true;
@@ -219,14 +337,16 @@ public abstract class MyAqsV3 implements MyAqs {
             boolean interrupted = false;
 
             for (; ; ) {
-                final Node p = node.prev;
+                final Node p = node.predecessor();
                 if (p == head) {
                     int r = tryAcquireShared(arg);
                     if (r >= 0) {
                         setHeadAndPropagate(node, r);
                         p.next = null; // help GC
                         if (interrupted) {
-                            selfInterrupt();
+                            // Thread.interrupted()清楚了中断标识，如果interrupted为true说明此前已经发生过中断
+                            // 重新补偿中断标识
+                            Thread.currentThread().interrupt();
                         }
                         failed = false;
                         return;
@@ -255,7 +375,7 @@ public abstract class MyAqsV3 implements MyAqs {
         boolean failed = true;
         try {
             for (;;) {
-                final Node p = node.prev;
+                final Node p = node.predecessor();
                 if (p == head) {
                     int r = tryAcquireShared(arg);
                     if (r >= 0) {
@@ -295,7 +415,7 @@ public abstract class MyAqsV3 implements MyAqs {
         boolean failed = true;
         try {
             for (;;) {
-                final Node p = node.prev;
+                final Node p = node.predecessor();
                 if (p == head) {
                     int r = tryAcquireShared(arg);
                     if (r >= 0) {
@@ -336,7 +456,8 @@ public abstract class MyAqsV3 implements MyAqs {
         Node h = head;
         setHead(node);
 
-        if (propagate > 0 || h == null) {
+        if (propagate > 0 || h == null || h.waitStatus < 0 ||
+                (h = head) == null || h.waitStatus < 0) {
             Node s = node.next;
             if (s != null && s.isShared()) {
                 doReleaseShared();
@@ -348,8 +469,17 @@ public abstract class MyAqsV3 implements MyAqs {
         for (;;) {
             Node h = head;
             if (h != null && h != tail) {
-                // 唤醒后继节点中的线程
-                unparkSuccessor(h);
+                int ws = h.waitStatus;
+                if (ws == Node.SIGNAL) {
+                    if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0)) {
+                        continue;            // loop to recheck cases
+                    }
+                    // 唤醒后继节点中的线程
+                    unparkSuccessor(h);
+                }
+                else if (ws == 0 && !compareAndSetWaitStatus(h, 0, Node.PROPAGATE)) {
+                    continue;                // loop on failed CAS
+                }
             }
 
             if (h == head) {
@@ -405,7 +535,7 @@ public abstract class MyAqsV3 implements MyAqs {
                     compareAndSetNext(pred, predNext, next);
                 }
             } else {
-                // node的前驱是head
+                // node的前驱是head （一定是吗？）
                 unparkSuccessor(node);
             }
 
@@ -452,123 +582,6 @@ public abstract class MyAqsV3 implements MyAqs {
         }
     }
 
-    /**
-     * 尝试着加入队列
-     * */
-    private boolean acquireQueued(final Node node, int arg) {
-        boolean failed = true;
-        try {
-            boolean interrupted = false;
-            for (; ; ) {
-                final Node p = node.prev;
-                // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
-                if (p == head && tryAcquire(arg)) {
-                    // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
-                    // 令当前入队的节点成为aqs中新的head节点
-                    setHead(node);
-                    p.next = null; // help GC
-                    failed = false;
-                    return interrupted;
-                }else{
-                    // 阻塞当前线程
-                    LockSupport.park(this);
-                    if (shouldParkAfterFailedAcquire(p, node)){
-                        // 将当前线程阻塞
-                        LockSupport.park(this);
-                        if(Thread.interrupted()){
-                            // 是被中断唤醒的,但是acquire=>acquireQueued是不可被中断的
-                            // 意味着，即使被中断唤醒了，还是需要继续尝试着争用锁。
-                            // 返回值interrupted为true标识着争用锁的过程中是发生了中断的
-                            interrupted = true;
-                        }
-                    }
-                }
-            }
-        }finally {
-            if (failed) {
-                // 发生异常导致入队失败
-                cancelAcquire(node);
-            }
-        }
-    }
-
-    /**
-     * 可被中断的获取互斥锁
-     * */
-    private void doAcquireInterruptibly(int arg) throws InterruptedException {
-        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
-        boolean failed = true;
-        try {
-            for (;;) {
-                final Node p = node.prev;
-                if (p == head && tryAcquire(arg)) {
-                    setHead(node);
-                    p.next = null; // help GC
-                    failed = false;
-                    return;
-                }
-                if (shouldParkAfterFailedAcquire(p, node)){
-                    // 将当前线程阻塞
-                    LockSupport.park(this);
-                    // 被唤醒后检查是否是由于被中断而唤醒的
-                    if(Thread.interrupted()){
-                        // 是被中断唤醒的，抛出中断异常（这就是可被中断，因为被中断后会抛异常不再尝试入队了，可以和acquireQueued做比较）
-                        // 同时finally中会将当前线程对应的Node设置为cancel
-                        throw new InterruptedException();
-                    }
-                }
-            }
-        } finally {
-            if (failed)
-                cancelAcquire(node);
-        }
-    }
-
-    private boolean doAcquireNanos(int arg, long nanosTimeout) throws InterruptedException {
-        if (nanosTimeout <= 0L) {
-            // 超时时间不为正数，直接超时加锁失败
-            return false;
-        }
-
-        final long deadline = System.nanoTime() + nanosTimeout;
-        final Node node = addWaiter(Node.EXCLUSIVE_MODE);
-        boolean failed = true;
-        try {
-            for (;;) {
-                final Node p = node.prev;
-                if (p == head && tryAcquire(arg)) {
-                    setHead(node);
-                    p.next = null; // help GC
-                    failed = false;
-                    return true;
-                }
-                // 尝试加锁失败
-                nanosTimeout = deadline - System.nanoTime();
-                if (nanosTimeout <= 0L) {
-                    // 当前已经超时，加锁失败返回false
-                    return false;
-                }
-                if (shouldParkAfterFailedAcquire(p, node) && nanosTimeout > spinForTimeoutThreshold) {
-                    // 将当前线程阻塞nanosTimeout毫秒
-                    LockSupport.parkNanos(this, nanosTimeout);
-                    // 被唤醒有三种可能:
-                    // 1. parkNanos超时时间已到被唤醒 => 在循环中尝试最后一次入队后（p == head && tryAcquire）,
-                    // 如果失败则会进入的if（nanosTimeout <= 0L）分支，返回false
-                    // 2. 被自己的前驱节点唤醒 => 尝试一次入队
-                    // 3. 被中断唤醒，进入的if（Thread.interrupted()分支，抛出中断异常
-                }
-                if (Thread.interrupted()) {
-                    throw new InterruptedException();
-                }
-            }
-        } finally {
-            if (failed) {
-                cancelAcquire(node);
-            }
-        }
-    }
-
-
     private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
         int ws = pred.waitStatus;
         if (ws == Node.SIGNAL) {
@@ -587,16 +600,17 @@ public abstract class MyAqsV3 implements MyAqs {
             } while (pred.waitStatus > 0);
             // 找到了一个不是CANCELLED的前驱节点，令其next指向当前节点node
             pred.next = node;
-            // 在经过一系列prev和next的拓扑调整后，
+            // 在经过一系列prev和最终next的拓扑调整后，
             // 在方法执行前同步队列中位于"参数node"和"与其距离最近的前驱节点"中处于CANCELLED状态的节点已经全部被移出了队列
         } else {
-            /*
-             * waitStatus must be 0 or PROPAGATE.  Indicate that we
-             * need a signal, but don't park yet.  Caller will need to
-             * retry to make sure it cannot acquire before parking.
-             */
-            // 如果pred节点的watiStatus不是CANCELLED，也不是SIGNAL。需要将其设置为SIGNAL
-            // todo 待分析，什么时候会是这个场景
+            // 如果pred节点的waitStatus不是CANCELLED，也不是SIGNAL。需要将其设置为SIGNAL
+            // 那么什么时候会是这种情况呢？
+            // 1. 新节点插入队尾时，原有的队尾节点状态为初始化状态0，此时需要先将原有的队尾节点（pred）设置为SIGNAL，这也是最常见的情况
+            // 2. 锁释放时unparkSuccessor内compareAndSetWaitStatus(node, ws, 0)
+            // 3. 共享锁释放，doReleaseShared时head节点被设置为PROPAGATE
+            //    在2、3两种情况下，都说明此时head节点对应的线程已经释放或是正在释放锁
+            //    返回false后令调用处再次尝试tryAcquire或者tryAcquireShared加锁将有很大的可能加锁成功（for无限循环）
+            //    但如果依然加锁失败，则会再次调用该方法在最前面的if (ws == Node.SIGNAL)处返回true后，使用LockSupport.park令当前线程进入阻塞态
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
         }
 
@@ -604,6 +618,9 @@ public abstract class MyAqsV3 implements MyAqs {
     }
 
     private void setHead(Node node) {
+        // setHead只会在tryAcquire/tryAcquireShared之后被调用，不会产生并发
+        // 只有enq初始化队列时才会执行compareAndSetHead，所以也不会和enq中的compareAndSetHead并发执行
+        // 因此这里为了效率，设置head引用时不使用cas的compareAndSetHead方法，而是直接赋值
         head = node;
         node.thread = null;
         node.prev = null;
@@ -656,10 +673,6 @@ public abstract class MyAqsV3 implements MyAqs {
         }
     }
 
-    static void selfInterrupt() {
-        Thread.currentThread().interrupt();
-    }
-
     /**
      * 尝试着去申请互斥锁（抽象方法，由具体的实现类控制）
      * */
@@ -704,6 +717,7 @@ public abstract class MyAqsV3 implements MyAqs {
          * */
         static final int CANCELLED =  1;
         static final int SIGNAL    = -1;
+        static final int PROPAGATE = -3;
 
 
         volatile Node prev;
@@ -727,6 +741,16 @@ public abstract class MyAqsV3 implements MyAqs {
 
         boolean isShared(){
             return mode == SHARED_MODE;
+        }
+
+        final Node predecessor() throws NullPointerException {
+            Node p = prev;
+            if (p == null) {
+                throw new NullPointerException();
+            }
+            else {
+                return p;
+            }
         }
     }
 

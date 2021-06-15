@@ -135,7 +135,7 @@ public abstract class MyAqsV1 implements MyAqs {
      * */
     private void acquireQueued(final Node node, int arg) {
         for (; ; ) {
-            final Node p = node.prev;
+            final Node p = node.predecessor();
             // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
             if (p == head && tryAcquire(arg)) {
                 // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
@@ -229,6 +229,16 @@ public abstract class MyAqsV1 implements MyAqs {
 
         Node(Thread thread) {
             this.thread = thread;
+        }
+
+        final Node predecessor() throws NullPointerException {
+            Node p = prev;
+            if (p == null) {
+                throw new NullPointerException();
+            }
+            else {
+                return p;
+            }
         }
     }
 
