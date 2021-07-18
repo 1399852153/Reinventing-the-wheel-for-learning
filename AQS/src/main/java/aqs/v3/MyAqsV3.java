@@ -279,8 +279,9 @@ public abstract class MyAqsV3 implements MyAqs {
                 }
             }
         } finally {
-            if (failed)
+            if (failed){
                 cancelAcquire(node);
+            }
         }
     }
 
@@ -459,7 +460,7 @@ public abstract class MyAqsV3 implements MyAqs {
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
                 (h = head) == null || h.waitStatus < 0) {
             Node s = node.next;
-            if (s != null && s.isShared()) {
+            if (s == null || s.isShared()) {
                 doReleaseShared();
             }
         }
@@ -468,24 +469,41 @@ public abstract class MyAqsV3 implements MyAqs {
     private void doReleaseShared() {
         for (;;) {
             Node h = head;
+
+            // 判断当前队列是否存在一个以上的节点
             if (h != null && h != tail) {
+
                 int ws = h.waitStatus;
                 if (ws == Node.SIGNAL) {
                     if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0)) {
+                        // 可能头节点已经被其它被唤醒的线程并发的执行unparkSuccessor了，continue 重新执行循环检查状态
+                        // 例如：存在读锁线程A、B、C、D，线程A先唤醒unparkSuccessor了B，然后B被唤醒后执行doReleaseShared时先唤醒了C也修改了头节点
+                        // 则A线程h != head,重新执行循环，此时获得head.waitStatus为SIGNAL，但是被线程C又执行doReleaseShared并发的修改了其状态
                         continue;            // loop to recheck cases
                     }
-                    // 唤醒后继节点中的线程
+                    // 唤醒后继节点中的线程（内部会将head.status设置为0）
                     unparkSuccessor(h);
                 }
                 else if (ws == 0 && !compareAndSetWaitStatus(h, 0, Node.PROPAGATE)) {
+                    // 假设有读锁节点A->读锁节点B->读锁节点C，读锁节点A初始时为head节点，h=节点A
+                    // 当前线程A唤醒的后继线程节点B在节点A执行到这里时已经先一步成为了head节点（线程A由于h != head而再次循环至此），
+                    // 而线程B已经执行了unparkSuccessor并将自己的状态设置为了0（head = 节点B，head.waitStatus = 0），唤醒或者即将唤醒线程C
+                    // 此时当前线程A执行至此时，需要将head的节点的waitStatus设置为PROPAGATE这一负数值，这样被唤醒的线程C如果加锁失败的话会执行shouldParkAfterFailedAcquire
+                    // shouldParkAfterFailedAcquire中if(ws == 0)的else分支，再次将head节点的waitStatus设置为SIGNAL
                     continue;                // loop on failed CAS
                 }
             }
 
             if (h == head) {
-                // 如果没有发生并发的锁释放，h依然是head，那么说明后续节点已经被正确唤醒，可以安全的退出循环，结束释放
-                return;
+                // 如果没有发生并发的锁释放，h依然是head，说明被唤醒的后继节点执行tryAcquire失败或者是还没有来得及修改head
+                break;
             }
+
+            // 否则说明被唤醒的后继节点执行tryAcquire成功，且在这一并发瞬间修改了head，令head指向了自己（当前线程节点的后继节点）
+            // 出现这种情况时，说明当前同步队列中可能存在大量被阻塞的读锁节点，当前线程会再次通过for循环尝试着去唤醒新head节点的后继，
+            // 这比完全依赖当前新head节点挨个唤醒其后继速度要快很多（越来越多的节点将参与到唤醒当前新head后继的任务中，称为唤醒风暴）
+            // 例如CountDownLatch中被阻塞了5000个线程（用作barrier屏障），调用countDown方法统一释放时，比起一个一个的唤醒线程，上述这种唤醒风暴的策略释放的速度会快很多
+            // 当然也可能h == head判断成功，当前线程break退出后也不会影响读锁广播唤醒后继读锁节点的正确性，这只是性能上的优化
         }
     }
 
@@ -521,21 +539,29 @@ public abstract class MyAqsV3 implements MyAqs {
             compareAndSetNext(pred, predNext, null);
         }else{
             // node不是尾节点；或者compareAndSetTail失败，pred也不是尾节点了
-            // If successor needs signal, try to set pred's next-link
-            // so it will get one. Otherwise wake it up to propagate.
+
+            // AQS中被阻塞线程是通过前驱节点的waitStatus为SIGNAL来控制其是否被唤醒的，在被阻塞前通过shouldParkAfterFailedAcquire将其设置为SIGNAL后进入阻塞态
+            // 当前节点执行cancelAcquire令自己变成CANCELLED状态时，需要令自己的后继节点依然能够被正确的唤醒（令其前驱节点为SIGNAL）
+            // ===============================
+            // 因此，如果自己的前驱节点是一个有效的节点时（pred.waitStatus <= 0并且thread != null），head头节点的thread=null所以也不是有效节点
+            // 便可以直接将自己的前驱节点与自己的后继节点建立联系（pred.next = node.next，优化unparkSuccessor的效率）,前提是自己的后继节点是一个有效的节点
+            // 注意：虽然在这之前已经通过一个while循环找到了当时不处于CANCELLED状态的前驱节点，但是在执行到这里时可能前驱节点的状态变了（例如前驱线程被中断了，也执行了cancelAcquire）
+            // ===============================
+            // 如果自己的前驱节点不是一个有效的节点时，则需要将自己的后继节点唤醒，令其通过shouldParkAfterFailedAcquire重新找到自己的有效前驱节点
+            // 也能够通过后继节点线程执行的shouldParkAfterFailedAcquire方法将同步队列中部分位于CANCELLED状态的节点及时的清除掉
             int ws;
             if (pred != head &&
-                    // 和shouldParkAfterFailedAcquire的场景类似
                 ((ws = pred.waitStatus) == Node.SIGNAL || (ws <= 0 && compareAndSetWaitStatus(pred, ws, Node.SIGNAL))) &&
                     pred.thread != null) {
-                // node的前驱不是head（node位于队列的中间，其pred非头节点自身也非尾节点），且pred节点的waitStatus为SIGNAL
+                // 前驱节点是一个有效节点
                 Node next = node.next;
                 if (next != null && next.waitStatus <= 0) {
-                    // next不是CANCELLED状态，令pred.next = node.next(即在next的链条上，将node摘除)
+                    // 后继也是一个需要被唤醒的有效节点
+                    // next不是CANCELLED状态，令pred.next = node.next
                     compareAndSetNext(pred, predNext, next);
                 }
             } else {
-                // node的前驱是head （一定是吗？）
+                // 前驱节点不是一个有效节点（dummy节点）
                 unparkSuccessor(node);
             }
 
