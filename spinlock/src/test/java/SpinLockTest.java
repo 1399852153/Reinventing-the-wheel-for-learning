@@ -1,5 +1,6 @@
 import spinlock.OriginalSpinLock;
 import spinlock.SpinLock;
+import spinlock.TicketSpinLock;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -12,7 +13,8 @@ import java.util.concurrent.Executors;
 public class SpinLockTest {
 
     public static void main(String[] args) throws InterruptedException {
-        testOriginalSpinLock();
+//        testOriginalSpinLock();
+        testTicketSpinLock();
     }
 
     private static void testOriginalSpinLock() throws InterruptedException {
@@ -28,6 +30,21 @@ public class SpinLockTest {
             throw new RuntimeException("OriginalSpinLock error: sumCount != result result=" + result);
         }
     }
+
+    private static void testTicketSpinLock() throws InterruptedException {
+        SpinLock spinLock = new TicketSpinLock();
+        int sumCount = 10;
+        int repeatSum = 1000;
+        ExecutorService executorService = Executors.newFixedThreadPool(sumCount);
+        int result = testConcurrentSum(executorService, spinLock, sumCount, repeatSum);
+        executorService.shutdown();
+
+        System.out.println(result);
+        if (sumCount*repeatSum != result) {
+            throw new RuntimeException("testTicketSpinLock error: sumCount != result result=" + result);
+        }
+    }
+
 
     private static int testConcurrentSum(ExecutorService executorService,SpinLock spinLock,int sumCount,int repeatSum) throws InterruptedException {
 
