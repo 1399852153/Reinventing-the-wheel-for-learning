@@ -5,6 +5,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * @author xiongyx
  * @date 2021/7/22
+ *
+ * 原始版CLH锁（无显示prev前驱节点引用，无法支持取消加锁等场景）
  */
 public class CLHLockV1 implements SpinLock{
     private static class CLHNode {
@@ -30,10 +32,14 @@ public class CLHLockV1 implements SpinLock{
         CLHNode currNode = curNode.get();
         currNode.isLocked = true;
 
+        // cas的设置当前节点为tail尾节点，并且获取到设置前的老tail节点
+        // 老的tail节点是当前加锁节点的前驱节点（隐式前驱节点），当前节点通过监听其isLocked状态来判断其是否已经解锁
         CLHNode preNode = tailNode.getAndSet(currNode);
         while (preNode.isLocked) {
             // 无限循环，等待获得锁
         }
+
+        // 循环结束，说明其前驱已经释放了锁，当前线程加锁成功
     }
 
     @Override
