@@ -1,3 +1,5 @@
+package util;
+
 import spinlock.SpinLock;
 
 import java.util.concurrent.CountDownLatch;
@@ -10,7 +12,6 @@ import java.util.concurrent.ExecutorService;
 public class SpinLockTestUtil {
 
     public static int testConcurrentSum(ExecutorService executorService, SpinLock spinLock, int sumCount, int repeatSum) throws InterruptedException {
-
         CountDownLatch driverLatch = new CountDownLatch(1);
         CountDownLatch barrierLatch = new CountDownLatch(sumCount);
 
@@ -33,9 +34,13 @@ public class SpinLockTestUtil {
                 barrierLatch.countDown();
             });
         }
+
+        long start = System.currentTimeMillis();
         driverLatch.countDown();
 
         barrierLatch.await();
+        long end = System.currentTimeMillis();
+        System.out.println("total cost=" + (end-start) + "ms");
 
         return count[0];
     }

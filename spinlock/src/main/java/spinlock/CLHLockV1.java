@@ -20,7 +20,6 @@ public class CLHLockV1 implements SpinLock{
     private final AtomicReference<CLHNode> tailNode;
     private final ThreadLocal<CLHNode> curNode;
 
-    // CLHLock构造函数，用于新建CLH锁节点时做一些初始化逻辑
     public CLHLockV1() {
         // 初始化时尾结点指向一个空的CLH节点
         tailNode = new AtomicReference<>(new CLHNode());
