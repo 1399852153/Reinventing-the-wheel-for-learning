@@ -1,7 +1,6 @@
 package spinlock;
 
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 
 /**
  * @author xiongyx
