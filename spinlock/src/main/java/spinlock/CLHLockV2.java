@@ -8,7 +8,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class CLHLockV2 implements SpinLock{
 
-
     private static class CLHNode {
         private volatile CLHNode prev;
         private volatile boolean isLocked;
@@ -21,8 +20,6 @@ public class CLHLockV2 implements SpinLock{
             this.isLocked = isLocked;
         }
     }
-
-
 
     private static final CLHNode DUMMY_NODE = new CLHNode(null,false);
 
