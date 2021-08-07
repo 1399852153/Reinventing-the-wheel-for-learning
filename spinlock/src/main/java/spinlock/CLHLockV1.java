@@ -27,6 +27,7 @@ public class CLHLockV1 implements SpinLock{
         curNode = ThreadLocal.withInitial(CLHNode::new);
     }
 
+    @Override
     public void lock() {
         CLHNode currNode = curNode.get();
         currNode.isLocked = true;
@@ -44,11 +45,10 @@ public class CLHLockV1 implements SpinLock{
     @Override
     public void unlock() {
         CLHNode node = curNode.get();
-        node.isLocked = false;
 
         // 清除当前threadLocal中的节点，避免再次Lock加锁时获取到之前的节点
         curNode.remove();
+
+        node.isLocked = false;
     }
-
-
 }

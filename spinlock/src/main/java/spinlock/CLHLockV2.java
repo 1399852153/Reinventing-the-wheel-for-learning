@@ -62,7 +62,7 @@ public class CLHLockV2 implements SpinLock{
     @Override
     public void unlock() {
         CLHNode currentNode = curNode.get();
-        currentNode.isLocked = false;
         curNode.remove();
+        currentNode.isLocked = false;
     }
 }
