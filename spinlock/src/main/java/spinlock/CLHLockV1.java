@@ -49,6 +49,7 @@ public class CLHLockV1 implements SpinLock{
         // 清除当前threadLocal中的节点，避免再次Lock加锁时获取到之前的节点
         curNode.remove();
 
+        // 先清除thread节点在释放锁，否则同一线程多次加锁在并发时会有问题
         node.isLocked = false;
     }
 }
