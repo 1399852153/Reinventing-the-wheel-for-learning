@@ -92,11 +92,7 @@ public abstract class MyAqsV1 implements MyAqs {
             // 成功释放
             Node h = this.head;
             if (h != null) {
-                Node next = h.next;
-                // 如果头节点及其next节点都存在，唤醒当前头节点的next节点对应的线程
-                if(next != null){
-                    unparkSuccessor(next);
-                }
+                unparkSuccessor(h);
             }
             return true;
         }
@@ -157,10 +153,14 @@ public abstract class MyAqsV1 implements MyAqs {
     }
 
     private void unparkSuccessor(Node node) {
-        LockSupport.unpark(node.thread);
+        Node next = node.next;
+
+        if(next != null) {
+            LockSupport.unpark(node.thread);
+        }
     }
 
-        private void setHead(Node node) {
+    private void setHead(Node node) {
         head = node;
         node.thread = null;
         node.prev = null;
