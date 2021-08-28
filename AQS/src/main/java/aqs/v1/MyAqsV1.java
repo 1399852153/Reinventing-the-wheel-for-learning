@@ -1,6 +1,7 @@
 package aqs.v1;
 
 import aqs.MyAqs;
+import aqs.v3.MyAqsV3;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
@@ -91,10 +92,10 @@ public abstract class MyAqsV1 implements MyAqs {
             // 成功释放
             Node h = this.head;
             if (h != null) {
-                // 如果头节点存在，唤醒当前头节点的next节点对应的线程
                 Node next = h.next;
+                // 如果头节点及其next节点都存在，唤醒当前头节点的next节点对应的线程
                 if(next != null){
-                    LockSupport.unpark(next.thread);
+                    unparkSuccessor(next);
                 }
             }
             return true;
@@ -155,7 +156,11 @@ public abstract class MyAqsV1 implements MyAqs {
         }
     }
 
-    private void setHead(Node node) {
+    private void unparkSuccessor(Node node) {
+        LockSupport.unpark(node.thread);
+    }
+
+        private void setHead(Node node) {
         head = node;
         node.thread = null;
         node.prev = null;
