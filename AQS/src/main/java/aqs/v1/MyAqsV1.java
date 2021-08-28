@@ -136,7 +136,12 @@ public abstract class MyAqsV1 implements MyAqs {
     private void acquireQueued(final Node node, int arg) {
         for (; ; ) {
             final Node p = node.predecessor();
-            // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+            // 如果需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+
+            // 之所以要在阻塞前最后判断一次，是因为release操作时，只检查了头结点的next是否存在
+            // 有可能此时head节点的尾结点正在入队，即enq或addaiter中只是cas设置队尾节点成功，但head的next还未设置
+            // 因此如果当前节点的前驱节点是head节点时，则通过tryAcquire再次确认一遍，
+            // 用于解决上述并发导致的head节点释放锁时无法唤醒尚未建立next关联的尾结点的特殊场景
             if (p == head && tryAcquire(arg)) {
                 // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
                 // 令当前入队的节点成为aqs中新的head节点
