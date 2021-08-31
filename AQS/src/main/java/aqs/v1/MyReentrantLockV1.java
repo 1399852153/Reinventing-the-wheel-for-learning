@@ -49,26 +49,6 @@ public class MyReentrantLockV1 {
             setState(c);
             return free;
         }
-
-        protected final boolean isHeldExclusively() {
-            // While we must in general read state before owner,
-            // we don't need to do so to check if current thread is owner
-            return getExclusiveOwnerThread() == Thread.currentThread();
-        }
-
-        // Methods relayed from outer class
-
-        final Thread getOwner() {
-            return getState() == 0 ? null : getExclusiveOwnerThread();
-        }
-
-        final int getHoldCount() {
-            return isHeldExclusively() ? getState() : 0;
-        }
-
-        final boolean isLocked() {
-            return getState() != 0;
-        }
     }
 
     static final class NonfairSync extends Sync {
@@ -119,30 +99,12 @@ public class MyReentrantLockV1 {
         }
     }
 
-
     public void lock() {
         sync.lock();
-    }
-
-    public boolean tryLock() {
-        return sync.nonfairTryAcquire(1);
     }
 
     public void unlock() {
         sync.release(1);
     }
-
-    public int getHoldCount() {
-        return sync.getHoldCount();
-    }
-
-    public boolean isHeldByCurrentThread() {
-        return sync.isHeldExclusively();
-    }
-
-    public boolean isLocked() {
-        return sync.isLocked();
-    }
-
 
 }
