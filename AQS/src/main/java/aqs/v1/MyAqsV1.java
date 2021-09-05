@@ -28,6 +28,7 @@ public abstract class MyAqsV1 implements MyAqs {
 
     static {
         try {
+            // 由于提供给cas内存中字段偏移量的unsafe类只能在被jdk信任的类中直接使用，这里使用反射来绕过这一限制
             Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
             getUnsafe.setAccessible(true);
             unsafe = (Unsafe) getUnsafe.get(null);
@@ -135,10 +136,13 @@ public abstract class MyAqsV1 implements MyAqs {
             final Node p = node.predecessor();
             // 如果需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
 
-            // 之所以要在阻塞前最后判断一次，是因为release操作时，只检查了头结点的next是否存在
-            // 有可能此时head节点的尾结点正在入队，即enq或addaiter中只是cas设置队尾节点成功，但head的next还未设置
-            // 因此如果当前节点的前驱节点是head节点时，则通过tryAcquire再次确认一遍，
-            // 用于解决上述并发导致的head节点释放锁时无法唤醒尚未建立next关联的尾结点的特殊场景
+            // 这里的判断有两个作用
+            // 1 当前线程第一次执行acquireQueued还未被LockSupport.park阻塞前，若当前线程的前驱恰好是头节点则
+            // 最后再通过tryAcquire判断一次，若恰好这个临界点上头节点对应的线程已经释放了锁，则可以免去一次LockSupport.park
+            // 2 当前线程已经不是第一次执行acquireQueued，而是已经至少被LockSupport.park阻塞过一次
+            // 则在被前驱节点唤醒后在for的无限循环中通过tryAcquired再尝试一次加锁
+            // 若是公平锁模式下，则此时tryAcquire应该会返回true而加锁成功return退出
+            // 若是非公平锁模式下，若此时有别的线程抢先获得了锁，则tryAcquire返回false，当前被唤醒的线程再一次通过LockSupport.park陷入阻塞
             if (p == head && tryAcquire(arg)) {
                 // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
                 // 令当前入队的节点成为aqs中新的head节点
@@ -166,6 +170,10 @@ public abstract class MyAqsV1 implements MyAqs {
         node.prev = null;
     }
 
+    /**
+     * 创建当前线程对应的同步队列节点
+     * 令该队列节点插入队尾
+     * */
     private Node addWaiter() {
         Node node = new Node(Thread.currentThread());
         Node pred = tail;
