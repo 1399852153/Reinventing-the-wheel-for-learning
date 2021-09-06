@@ -160,7 +160,7 @@ public abstract class MyAqsV1 implements MyAqs {
         Node next = node.next;
 
         if(next != null) {
-            LockSupport.unpark(node.thread);
+            LockSupport.unpark(next.thread);
         }
     }
 
