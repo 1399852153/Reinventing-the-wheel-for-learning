@@ -156,6 +156,9 @@ public abstract class MyAqsV1 implements MyAqs {
         }
     }
 
+    /**
+     * 唤醒后继节点
+     * */
     private void unparkSuccessor(Node node) {
         Node next = node.next;
 
