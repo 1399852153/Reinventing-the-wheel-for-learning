@@ -1,7 +1,6 @@
 package aqs.v1;
 
 import aqs.MyAqs;
-import aqs.v3.MyAqsV3;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
