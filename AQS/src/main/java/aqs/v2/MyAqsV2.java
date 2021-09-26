@@ -28,6 +28,7 @@ public abstract class MyAqsV2 implements MyAqs {
 
     static {
         try {
+            // 由于提供给cas内存中字段偏移量的unsafe类只能在被jdk信任的类中直接使用，这里使用反射来绕过这一限制
             Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
             getUnsafe.setAccessible(true);
             unsafe = (Unsafe) getUnsafe.get(null);
@@ -64,7 +65,7 @@ public abstract class MyAqsV2 implements MyAqs {
     }
 
     /**
-     * 尝试获取互斥锁，如果加锁失败则当前线程进入阻塞状态
+     * 尝试加互斥锁，如果加锁失败则当前线程进入阻塞状态
      * */
     @Override
     public final boolean acquire(int arg) {
@@ -92,7 +93,6 @@ public abstract class MyAqsV2 implements MyAqs {
             // 成功释放
             Node h = this.head;
             if (h != null) {
-                // 如果头节点存在，唤醒当前头节点的next节点对应的线程
                 unparkSuccessor(h);
             }
             return true;
@@ -194,20 +194,21 @@ public abstract class MyAqsV2 implements MyAqs {
         }
     }
 
-    private void unparkSuccessor(Node node) {
-        Node next = node.next;
-        if(next != null){
-            LockSupport.unpark(next.thread);
-        }
-    }
-
     /**
      * 尝试着加入队列
      * */
     private void acquireQueued(final Node node, int arg) {
         for (; ; ) {
             final Node p = node.predecessor();
-            // 如果是需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+            // 如果需要入队的节点是aqs头节点的next节点，则最后尝试一次tryAcquire获取锁
+
+            // 这里的判断有两个作用
+            // 1 当前线程第一次执行acquireQueued还未被LockSupport.park阻塞前，若当前线程的前驱恰好是头节点则
+            // 最后再通过tryAcquire判断一次，若恰好这个临界点上头节点对应的线程已经释放了锁，则可以免去一次LockSupport.park
+            // 2 当前线程已经不是第一次执行acquireQueued，而是已经至少被LockSupport.park阻塞过一次
+            // 则在被前驱节点唤醒后在for的无限循环中通过tryAcquired再尝试一次加锁
+            // 若是公平锁模式下，则此时tryAcquire应该会返回true而加锁成功return退出
+            // 若是非公平锁模式下，若此时有别的线程抢先获得了锁，则tryAcquire返回false，当前被唤醒的线程再一次通过LockSupport.park陷入阻塞
             if (p == head && tryAcquire(arg)) {
                 // tryAcquire获取锁成功成功，说明此前的瞬间头节点对应的线程已经释放了锁
                 // 令当前入队的节点成为aqs中新的head节点
@@ -221,12 +222,27 @@ public abstract class MyAqsV2 implements MyAqs {
         }
     }
 
+    /**
+     * 唤醒后继节点
+     * */
+    private void unparkSuccessor(Node node) {
+        Node next = node.next;
+
+        if(next != null) {
+            LockSupport.unpark(next.thread);
+        }
+    }
+
     private void setHead(Node node) {
         head = node;
         node.thread = null;
         node.prev = null;
     }
 
+    /**
+     * 创建当前线程对应的同步队列节点
+     * 令该队列节点插入队尾
+     * */
     private Node addWaiter(int mode) {
         Node node = new Node(mode,Thread.currentThread());
         Node pred = tail;

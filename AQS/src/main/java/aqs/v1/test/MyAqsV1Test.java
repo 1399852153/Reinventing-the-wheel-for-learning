@@ -1,7 +1,9 @@
 package aqs.v1.test;
 
 import aqs.v1.MyReentrantLockV1;
+import aqs.v2.MyCountDownLatch;
 
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -11,33 +13,31 @@ import java.util.concurrent.Executors;
  */
 public class MyAqsV1Test {
 
+    private static volatile int num = 0;
     public static void main(String[] args) throws InterruptedException {
-       testConcurrentAdd(100,10000);
+       testConcurrentAdd(300,10000);
     }
 
     private static void testConcurrentAdd(int concurrentThreadNum,int repeatNum) throws InterruptedException {
         MyReentrantLockV1 myReentrantLock = new MyReentrantLockV1(true);
-
-        final int[] num = {0};
+        MyCountDownLatch countDownLatch = new MyCountDownLatch(concurrentThreadNum);
         ExecutorService executorService = Executors.newFixedThreadPool(concurrentThreadNum);
 
         for(int i=0; i<concurrentThreadNum; i++){
             executorService.execute(()-> {
                 for(int j=0; j<repeatNum; j++){
                     myReentrantLock.lock();
-//                    System.out.println("doAdd thread=" + Thread.currentThread().getName() + " num=" + num[0]);
-                    num[0]++;
-//                    System.out.println("doAdd over thread=" + Thread.currentThread().getName() + " num=" + num[0]);
+                    num++;
                     myReentrantLock.unlock();
                 }
+                countDownLatch.countDown();
             });
         }
 
-        // 简单起见直接休眠一段时间(repeatNum不要太大就行，待优化为countDownLatch)
-        Thread.sleep(concurrentThreadNum * 100L);
+        countDownLatch.await();
 
-        System.out.println("" + num[0] + " concurrentThreadNum * repeatNum=" + concurrentThreadNum * repeatNum);
-        if(num[0] != concurrentThreadNum * repeatNum){
+        System.out.println("" + num + " concurrentThreadNum * repeatNum=" + concurrentThreadNum * repeatNum);
+        if(num != concurrentThreadNum * repeatNum){
             throw new RuntimeException("并发add存在问题");
         }
 
