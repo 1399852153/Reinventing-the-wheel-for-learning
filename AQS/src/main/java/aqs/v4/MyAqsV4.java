@@ -4,10 +4,6 @@ import aqs.MyAqs;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
-import java.util.Date;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.AbstractQueuedSynchronizer;
-import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -92,7 +88,7 @@ public abstract class MyAqsV4 implements MyAqs {
             if(interrupted){
                 // 如果加锁过程中确实发生过了中断，但acquireQueued内部Thread.interrupted将中断标识清楚了
                 // 在这里调用interrupt，重新补偿中断标识
-                Thread.currentThread().interrupt();
+                selfInterrupt();
             }
             // 尝试着加入同步队列
             return interrupted;
@@ -351,7 +347,7 @@ public abstract class MyAqsV4 implements MyAqs {
                         if (interrupted) {
                             // Thread.interrupted()清楚了中断标识，如果interrupted为true说明此前已经发生过中断
                             // 重新补偿中断标识
-                            Thread.currentThread().interrupt();
+                            selfInterrupt();
                         }
                         failed = false;
                         return;
@@ -887,7 +883,7 @@ public abstract class MyAqsV4 implements MyAqs {
          * 检查当前节点线程的中断状态
          * 返回0：代表未发生中断
          * 返回THROW_IE：需要调用方抛出中断异常，退出等待
-         * 返回REINTERRUPT：不抛出中断异常，通过Thread.currentThread().interrupt()，恢复中断标志位
+         * 返回REINTERRUPT：不抛出中断异常，通过selfInterrupt，恢复中断标志位
          */
         private int checkInterruptWhileWaiting(Node node) {
             if(Thread.interrupted()){
@@ -980,7 +976,7 @@ public abstract class MyAqsV4 implements MyAqs {
                 throw new InterruptedException();
             } else if (interruptMode == REINTERRUPT) {
                 // 中断模式为REINTERRUPT，代表不抛出异常，仅仅是将消费过的中断标志位复原
-                Thread.currentThread().interrupt();
+                selfInterrupt();
             }
             // 没有发生中断，什么也不做
         }
@@ -1022,25 +1018,23 @@ public abstract class MyAqsV4 implements MyAqs {
         }
 
         /**
-         * Implements interruptible condition wait.
-         * <ol>
-         * <li> If current thread is interrupted, throw InterruptedException.
-         * <li> Save lock state returned by {@link #getState}.
-         * <li> Invoke {@link #release} with saved state as argument,
-         *      throwing IllegalMonitorStateException if it fails.
-         * <li> Block until signalled or interrupted.
-         * <li> Reacquire by invoking specialized version of
-         *      {@link #acquire} with saved state as argument.
-         * <li> If interrupted while blocked in step 4, throw InterruptedException.
-         * </ol>
-         */
+         * 实现条件变量的等待
+         * 1 如果当前线程被中断，抛出InterruptedException异常
+         * 2 通过getState的返回值state，来保存释放锁时的快照状态（fullyRelease）
+         * 3 调用release方法时，参数传入getState时获得的快照值state进行所得释放（如果失败则回抛出IllegalMonitorStateException异常）
+         * 4 当前线程被阻塞直到被signal操作唤醒，或者被中断唤醒
+         * 5 被唤醒后，节点前往同步队列时acquire传入state，恢复被await挂起前的锁状态
+         * 6 如果在第4步的时候，是被中断唤醒的（不是被signal唤醒），则抛出InterruptedException异常
+         * */
         @Override
         public void await() throws InterruptedException {
-            // todo 待完善注释
             if (Thread.interrupted()) {
+                // await前已经发生中断，直接抛出中断异常
                 throw new InterruptedException();
             }
+            // node从队尾加入队列
             Node node = addConditionWaiter();
+            // 获取当前state快照，并将state清0用以释放互斥锁
             int savedState = fullyRelease(node);
             int interruptMode = 0;
             while (!isOnSyncQueue(node)) {
@@ -1056,7 +1050,7 @@ public abstract class MyAqsV4 implements MyAqs {
             boolean interrupted = acquireQueued(node, savedState);
             if (interrupted && interruptMode != THROW_IE) {
                 // acquireQueued过程中有发生中断，但interruptMode为不抛出异常，则interruptMode修正为REINTERRUPT
-                // 主要针对interrupted=0，在上面checkInterruptWhileWaiting中没发生中断的场景
+                // 主要针对interruptMode=0，在上面checkInterruptWhileWaiting中没发生中断的场景
                 interruptMode = REINTERRUPT;
             }
             if (node.nextWaiter != null) { // clean up if cancelled
@@ -1071,24 +1065,89 @@ public abstract class MyAqsV4 implements MyAqs {
             }
         }
 
+        /**
+         * 不可被中断阻止的await(发生中断时，不响应中断，继续等待)
+         * 只能通过signal来结束await等待
+         * */
         @Override
         public void awaitUninterruptibly() {
+            // node从队尾加入队列
+            Node node = addConditionWaiter();
+            // 获取当前state快照，并将state清0用以释放互斥锁
+            int savedState = fullyRelease(node);
+            boolean interrupted = false;
+            while (!isOnSyncQueue(node)) {
+                // 不再同步队列中，则将当前线程阻塞
+                LockSupport.park(this);
+                // 被唤醒后，判断是否是因为中断唤醒的
+                if (Thread.interrupted()) {
+                    // 是中断唤醒的，但是由于awaitUninterruptibly不响应中断
+                    // 设置interrupted标记为true，但继续下一次循环
+                    interrupted = true;
+                }
+            }
 
+            // isOnSyncQueue为false，退出循环，说明是被signal操作唤醒
+            // acquireQueued返回值为true 或者 interrupted为true都代表awaitUninterruptibly期间线程被中断唤醒过
+            if (acquireQueued(node, savedState) || interrupted) {
+                // 通过selfInterrupt恢复被方法内消耗的中断标示，令调用者感知到awaitUninterruptibly期间线程被中断唤醒过
+                selfInterrupt();
+            }
         }
 
+        /**
+         * 在await支持中断的基础上，支持超时取消
+         * @param nanosTimeout 等待的最大超时时间
+         * */
         @Override
         public long awaitNanos(long nanosTimeout) throws InterruptedException {
-            return 0;
-        }
+            if (Thread.interrupted()) {
+                // await前已经发生中断，直接抛出中断异常
+                throw new InterruptedException();
+            }
+            // node从队尾加入队列
+            Node node = addConditionWaiter();
+            // 获取当前state快照，并将state清0用以释放互斥锁
+            int savedState = fullyRelease(node);
+            // 通过系统当前时间+参数中指定的超时时间，算出超时的最终时间点
+            final long deadline = System.nanoTime() + nanosTimeout;
+            int interruptMode = 0;
+            while (!isOnSyncQueue(node)) {
+                if (nanosTimeout <= 0L) {
+                    // 如果nanosTimeout小于等于0，说明已经超时则取消等待，并送入同步队列中
+                    transferAfterCancelledWait(node);
+                    break;
+                }
+                if (nanosTimeout >= spinForTimeoutThreshold) {
+                    // nanosTimeout超时时间大于预设的自旋超时时间，则令线程进入阻塞态
+                    // 并且在nanosTimeout后被自动唤醒
+                    LockSupport.parkNanos(this, nanosTimeout);
+                }
+                if ((interruptMode = checkInterruptWhileWaiting(node)) != 0) {
+                    // 如果发生了中断则interruptMode不为0，跳出循环
+                    break;
+                }
+                // （nanosTimeout < spinForTimeoutThreshold）未被阻塞，修正nanosTimeout的值
+                nanosTimeout = deadline - System.nanoTime();
+            }
 
-        @Override
-        public boolean await(long time, TimeUnit unit) throws InterruptedException {
-            return false;
-        }
+            // 被唤醒后，令节点工作在同步队列中（方法内tryAcquire加互斥锁失败则阻塞在同步队列中）
+            if (acquireQueued(node, savedState) && interruptMode != THROW_IE) {
+                // acquireQueued过程中有发生中断，但interruptMode为不抛出异常，则interruptMode修正为REINTERRUPT
+                // 主要针对interruptMode=0，在上面checkInterruptWhileWaiting中没发生中断的场景
+                interruptMode = REINTERRUPT;
+            }
+            if (node.nextWaiter != null) {
+                // node不是等待队列的尾节点，通过unlinkCancelledWaiters将自己从等待队列中剔除（不再是CONDITION节点了）
+                unlinkCancelledWaiters();
+            }
+            if (interruptMode != 0) {
+                // interruptMode中断状态不为0，代表发生了中断，根据interruptMode来进行相应的处理
+                reportInterruptAfterWait(interruptMode);
+            }
 
-        @Override
-        public boolean awaitUntil(Date deadline) throws InterruptedException {
-            return false;
+            // 执行完毕时，距离参数指定的nanosTimeout的剩余时间
+            return deadline - System.nanoTime();
         }
 
         @Override
@@ -1184,6 +1243,13 @@ public abstract class MyAqsV4 implements MyAqs {
             }
             t = t.prev;
         }
+    }
+
+    /**
+     * Convenience method to interrupt current thread.
+     */
+    static void selfInterrupt() {
+        Thread.currentThread().interrupt();
     }
 
 
