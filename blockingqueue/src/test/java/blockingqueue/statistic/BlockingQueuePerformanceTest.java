@@ -13,17 +13,17 @@ public class BlockingQueuePerformanceTest {
     /**
      * 队列容量
      * */
-    private static final int QUEUE_CAPACITY = 2;
+    private static final int QUEUE_CAPACITY = 5;
 
     /**
      * 并发线程数（消费者 + 生产者 = 2 * WORKER_NUM）
      * */
-    private static final int WORKER_NUM = 50;
+    private static final int WORKER_NUM = 100;
 
     /**
      * 单次测试中每个线程访问队列的次数
      * */
-    private static final int PER_WORKER_PROCESS_NUM = 500;
+    private static final int PER_WORKER_PROCESS_NUM = 1000;
 
     /**
      * 重复执行的次数
@@ -69,22 +69,10 @@ public class BlockingQueuePerformanceTest {
 //        }
 
         {
-            MyBlockingQueue<Integer> myArrayBlockingQueueV5 = new MyArrayBlockingQueueV5NeedOpt1<>(QUEUE_CAPACITY);
-            long avgCostTimeV5 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV5, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-            System.out.println(costTimeLog(MyArrayBlockingQueueV5.class, avgCostTimeV5));
+            MyBlockingQueue<Integer> myArrayBlockingQueueWithMyAQS = new MyArrayBlockingQueueWithMyAQS<>(QUEUE_CAPACITY);
+            long avgCostTimeMyAQS = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeMyAQS));
         }
-
-//        {
-//            MyBlockingQueue<Integer> myArrayBlockingQueueV5 = new MyArrayBlockingQueueV5NeedOpt2<>(QUEUE_CAPACITY);
-//            long avgCostTimeV5 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV5, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-//            System.out.println(costTimeLog(MyArrayBlockingQueueV5.class, avgCostTimeV5));
-//        }
-
-//        {
-//            MyBlockingQueue<Integer> myArrayBlockingQueueWithMyAQS = new MyArrayBlockingQueueWithMyAQS<>(QUEUE_CAPACITY);
-//            long avgCostTimeMyAQS = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-//            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeMyAQS));
-//        }
     }
 
     private static String costTimeLog(Class blockQueueCLass,long costTime){

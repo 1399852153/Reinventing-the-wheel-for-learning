@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v5版本
+ * 数组作为底层结构的阻塞队列 v5版本（内部不实用jdk的ReenterLock，而是使用自己实现的ReenterLock和MyAQS）
  */
 public class MyArrayBlockingQueueWithMyAQS<E> implements MyBlockingQueue<E> {
 
