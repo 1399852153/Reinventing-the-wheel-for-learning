@@ -10,7 +10,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v5版本
+ * 数组作为底层结构的阻塞队列 v5版本待优化版本2
+ * (注意：跑起来是有问题的 MyArrayBlockingQueueV5才是ok)
  */
 public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
 
