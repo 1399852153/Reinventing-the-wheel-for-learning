@@ -1,4 +1,4 @@
-package blockingqueue.array;
+package blockingqueue.jdk;
 
 import blockingqueue.MyBlockingQueue;
 
