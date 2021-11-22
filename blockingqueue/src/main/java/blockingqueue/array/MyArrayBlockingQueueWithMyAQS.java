@@ -1,14 +1,17 @@
-package blockingqueue;
+package blockingqueue.array;
+
 
 import aqs.v4.Condition;
 import aqs.v4.MyReentrantLockV4;
+import blockingqueue.MyBlockingQueue;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-
 /**
  * @author xiongyx
- * @date 2021/11/20
+ *@date 2021/3/23
+ *
+ * 数组作为底层结构的阻塞队列 v5版本
  */
 public class MyArrayBlockingQueueWithMyAQS<E> implements MyBlockingQueue<E> {
 
@@ -137,6 +140,11 @@ public class MyArrayBlockingQueueWithMyAQS<E> implements MyBlockingQueue<E> {
             enqueue(e);
 
             currentCount = count.getAndIncrement();
+
+            // 如果在插入后队列仍然没满，则唤醒其他等待插入的线程
+            if (currentCount + 1 < elements.length) {
+                notFull.signal();
+            }
         } finally {
             // 入队完毕，释放锁
             putLock.unlock();
@@ -165,6 +173,11 @@ public class MyArrayBlockingQueueWithMyAQS<E> implements MyBlockingQueue<E> {
             headElement = dequeue();
 
             currentCount = this.count.getAndDecrement();
+
+            // 如果队列在弹出一个元素后仍然非空，则唤醒其他等待队列非空的线程
+            if (currentCount - 1 > 0) {
+                notEmpty.signal();
+            }
         } finally {
             // 出队完毕，释放锁
             takeLock.unlock();

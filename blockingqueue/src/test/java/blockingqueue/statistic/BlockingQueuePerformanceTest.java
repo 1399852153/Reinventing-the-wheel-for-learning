@@ -1,6 +1,5 @@
 package blockingqueue.statistic;
 
-import blockingqueue.MyArrayBlockingQueueWithMyAQS;
 import blockingqueue.MyBlockingQueue;
 import blockingqueue.array.*;
 import blockingqueue.util.BlockingQueueTestUtil;
@@ -14,22 +13,22 @@ public class BlockingQueuePerformanceTest {
     /**
      * 队列容量
      * */
-    private static final int QUEUE_CAPACITY = 3;
+    private static final int QUEUE_CAPACITY = 2;
 
     /**
      * 并发线程数（消费者 + 生产者 = 2 * WORKER_NUM）
      * */
-    private static final int WORKER_NUM = 5;
+    private static final int WORKER_NUM = 50;
 
     /**
      * 单次测试中每个线程访问队列的次数
      * */
-    private static final int PER_WORKER_PROCESS_NUM = 20;
+    private static final int PER_WORKER_PROCESS_NUM = 500;
 
     /**
      * 重复执行的次数
      * */
-    private static final int REPEAT_TIME = 5;
+    private static final int REPEAT_TIME = 20;
 
 
     public static void main(String[] args) throws InterruptedException {
@@ -71,8 +70,8 @@ public class BlockingQueuePerformanceTest {
 
         {
             MyBlockingQueue<Integer> myArrayBlockingQueueWithMyAQS = new MyArrayBlockingQueueWithMyAQS<>(QUEUE_CAPACITY);
-            long avgCostTimeJDK = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeJDK));
+            long avgCostTimeMyAQS = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeMyAQS));
         }
     }
 
