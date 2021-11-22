@@ -1,7 +1,7 @@
 package blockingqueue.statistic;
 
 import blockingqueue.MyBlockingQueue;
-import blockingqueue.array.*;
+import blockingqueue.array.MyArrayBlockingQueueWithMyAQS;
 import blockingqueue.util.BlockingQueueTestUtil;
 
 /**
