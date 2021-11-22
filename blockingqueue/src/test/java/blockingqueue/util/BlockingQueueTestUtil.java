@@ -33,22 +33,28 @@ public class BlockingQueueTestUtil {
     private static long oneTurnExecute(ExecutorService executorService, MyBlockingQueue<Integer> blockingQueue,
                                        int workerNum, int perWorkerProcessNum) throws InterruptedException {
         long startTime = System.currentTimeMillis();
+        System.out.println("111========" + workerNum * 2);
         CountDownLatch countDownLatch = new CountDownLatch(workerNum * 2);
 
         // 创建workerNum个生产者/消费者
         for(int i=0; i<workerNum; i++){
+            int num = i;
             executorService.execute(()->{
                 produce(blockingQueue,perWorkerProcessNum);
+                System.out.println("produce ok========" + num);
                 countDownLatch.countDown();
             });
 
             executorService.execute(()->{
                 consume(blockingQueue,perWorkerProcessNum);
+                System.out.println("consume ok========" + num);
                 countDownLatch.countDown();
             });
         }
         countDownLatch.await();
         long endTime = System.currentTimeMillis();
+
+        System.out.println("endTime=" + endTime);
 
         return endTime - startTime;
     }

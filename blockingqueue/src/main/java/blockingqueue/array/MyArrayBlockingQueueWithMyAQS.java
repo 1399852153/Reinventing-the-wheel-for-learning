@@ -1,20 +1,19 @@
 package blockingqueue.array;
 
 
+import aqs.v4.Condition;
+import aqs.v4.MyReentrantLockV4;
 import blockingqueue.MyBlockingQueue;
 
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author xiongyx
  *@date 2021/3/23
  *
- * 数组作为底层结构的阻塞队列 v5版本待优化版本2
- * (注意：跑起来是有问题的 MyArrayBlockingQueueV5才是ok)
+ * 数组作为底层结构的阻塞队列 v5版本
  */
-public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
+public class MyArrayBlockingQueueWithMyAQS<E> implements MyBlockingQueue<E> {
 
     /**
      * 队列默认的容量大小
@@ -41,11 +40,11 @@ public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
      * */
     private final AtomicInteger count = new AtomicInteger();
 
-    private final ReentrantLock putLock;
+    private final MyReentrantLockV4 putLock;
 
     private final Condition notEmpty;
 
-    private final ReentrantLock takeLock;
+    private final MyReentrantLockV4 takeLock;
 
     private final Condition notFull;
 
@@ -54,14 +53,14 @@ public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV5NeedOpt2() {
-       this(DEFAULT_CAPACITY);
+    public MyArrayBlockingQueueWithMyAQS() {
+        this(DEFAULT_CAPACITY);
     }
 
     /**
      * 默认构造方法
      * */
-    public MyArrayBlockingQueueV5NeedOpt2(int initCapacity) {
+    public MyArrayBlockingQueueWithMyAQS(int initCapacity) {
         assert initCapacity > 0;
 
         // 设置数组大小为默认
@@ -71,10 +70,10 @@ public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
         this.head = 0;
         this.tail = 0;
 
-        this.takeLock = new ReentrantLock();
+        this.takeLock = new MyReentrantLockV4();
         this.notEmpty = this.takeLock.newCondition();
 
-        this.putLock = new ReentrantLock();
+        this.putLock = new MyReentrantLockV4();
         this.notFull = this.putLock.newCondition();
     }
 
@@ -141,6 +140,11 @@ public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
             enqueue(e);
 
             currentCount = count.getAndIncrement();
+
+            // 如果在插入后队列仍然没满，则唤醒其他等待插入的线程
+            if (currentCount + 1 < elements.length) {
+                notFull.signal();
+            }
         } finally {
             // 入队完毕，释放锁
             putLock.unlock();
@@ -169,6 +173,11 @@ public class MyArrayBlockingQueueV5NeedOpt2<E> implements MyBlockingQueue<E> {
             headElement = dequeue();
 
             currentCount = this.count.getAndDecrement();
+
+            // 如果队列在弹出一个元素后仍然非空，则唤醒其他等待队列非空的线程
+            if (currentCount - 1 > 0) {
+                notEmpty.signal();
+            }
         } finally {
             // 出队完毕，释放锁
             takeLock.unlock();
