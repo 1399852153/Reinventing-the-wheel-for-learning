@@ -69,10 +69,22 @@ public class BlockingQueuePerformanceTest {
 //        }
 
         {
-            MyBlockingQueue<Integer> myArrayBlockingQueueWithMyAQS = new MyArrayBlockingQueueWithMyAQS<>(QUEUE_CAPACITY);
-            long avgCostTimeMyAQS = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
-            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeMyAQS));
+            MyBlockingQueue<Integer> myArrayBlockingQueueV5 = new MyArrayBlockingQueueV5NeedOpt1<>(QUEUE_CAPACITY);
+            long avgCostTimeV5 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV5, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+            System.out.println(costTimeLog(MyArrayBlockingQueueV5.class, avgCostTimeV5));
         }
+
+//        {
+//            MyBlockingQueue<Integer> myArrayBlockingQueueV5 = new MyArrayBlockingQueueV5NeedOpt2<>(QUEUE_CAPACITY);
+//            long avgCostTimeV5 = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueV5, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+//            System.out.println(costTimeLog(MyArrayBlockingQueueV5.class, avgCostTimeV5));
+//        }
+
+//        {
+//            MyBlockingQueue<Integer> myArrayBlockingQueueWithMyAQS = new MyArrayBlockingQueueWithMyAQS<>(QUEUE_CAPACITY);
+//            long avgCostTimeMyAQS = BlockingQueueTestUtil.statisticBlockingQueueRuntime(myArrayBlockingQueueWithMyAQS, WORKER_NUM, PER_WORKER_PROCESS_NUM, REPEAT_TIME);
+//            System.out.println(costTimeLog(MyArrayBlockingQueueWithMyAQS.class, avgCostTimeMyAQS));
+//        }
     }
 
     private static String costTimeLog(Class blockQueueCLass,long costTime){
