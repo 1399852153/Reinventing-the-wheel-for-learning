@@ -10,6 +10,20 @@
 
     <name>Blocking-queue</name>
 
+    <dependencies>
+        <dependency>
+            <groupId>Reinventing-the-wheel</groupId>
+            <artifactId>AQS</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>Reinventing-the-wheel</groupId>
+            <artifactId>AQS</artifactId>
+            <version>1.0-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <plugin>
