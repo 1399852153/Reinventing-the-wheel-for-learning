@@ -4,7 +4,6 @@ import aqs.MyAqs;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
-import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -34,6 +33,7 @@ public abstract class MyAqsV3 implements MyAqs {
 
     static {
         try {
+            // 由于提供给cas内存中字段偏移量的unsafe类只能在被jdk信任的类中直接使用，这里使用反射来绕过这一限制
             Field getUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
             getUnsafe.setAccessible(true);
             unsafe = (Unsafe) getUnsafe.get(null);

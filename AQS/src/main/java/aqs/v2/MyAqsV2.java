@@ -64,7 +64,7 @@ public abstract class MyAqsV2 implements MyAqs {
     }
 
     /**
-     * 尝试加互斥锁，如果加锁失败则当前线程进入阻塞状态
+     * 尝试获取互斥锁，如果加锁失败则当前线程进入阻塞状态
      * */
     @Override
     public final boolean acquire(int arg) {
