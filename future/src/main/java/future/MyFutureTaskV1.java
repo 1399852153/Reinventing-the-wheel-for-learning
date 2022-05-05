@@ -5,7 +5,7 @@ import sun.misc.Unsafe;
 import java.lang.reflect.Field;
 import java.util.concurrent.*;
 
-public class MyFutureTask<V> implements MyFuture<V>,Runnable{
+public class MyFutureTaskV1<V> implements MyFuture<V>,Runnable{
 
     private volatile int state;
     private static final int NEW = 0;
@@ -32,7 +32,7 @@ public class MyFutureTask<V> implements MyFuture<V>,Runnable{
         }
     }
 
-    public MyFutureTask(Callable<V> callable) {
+    public MyFutureTaskV1(Callable<V> callable) {
         if (callable == null) {
             throw new NullPointerException();
         }
@@ -41,7 +41,7 @@ public class MyFutureTask<V> implements MyFuture<V>,Runnable{
         this.state = NEW;
     }
 
-    public MyFutureTask(Runnable runnable, V result) {
+    public MyFutureTaskV1(Runnable runnable, V result) {
         // 使用适配器模式，将runnable包装成callable
         // 会执行runnable.run(),并且返回值固定为result（无法自由控制返回值的内容，适用性不如Callable类型的构造方法）
         this.callable = Executors.callable(runnable, result);
@@ -60,7 +60,24 @@ public class MyFutureTask<V> implements MyFuture<V>,Runnable{
 //            return;
 //        }
 
-        Callable<V> c = callable;
+        Callable<V> callable = this.callable;
+
+        if (callable != null && state == NEW) {
+            V result;
+            boolean hasEx;
+            try {
+                result = callable.call();
+                hasEx = false;
+            } catch (Throwable e) {
+                result = null;
+                hasEx = true;
+                setException(ex);
+            }
+
+            if(!hasEx){
+                set(result);
+            }
+        }
     }
 
     @Override
