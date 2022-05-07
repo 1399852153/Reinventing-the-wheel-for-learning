@@ -31,4 +31,12 @@ public class SingleProducerSequencer {
         this.currentProducerIndex = nextProducerIndex;
         return nextProducerIndex;
     }
+
+    public long getCurrentProducerIndex() {
+        return currentProducerIndex;
+    }
+
+    public int getRingBufferSize() {
+        return ringBufferSize;
+    }
 }
