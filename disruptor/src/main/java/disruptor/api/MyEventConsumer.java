@@ -1,7 +1,7 @@
 package disruptor.api;
 
 /**
- * 消费者的事件处理器接口
+ * 消费者的事件处理器的接口
  * */
 public interface MyEventConsumer<T> {
 

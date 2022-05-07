@@ -5,11 +5,6 @@ public class OrderModel {
     private String message;
     private int price;
 
-    public OrderModel(String message, int price) {
-        this.message = message;
-        this.price = price;
-    }
-
     public String getMessage() {
         return message;
     }

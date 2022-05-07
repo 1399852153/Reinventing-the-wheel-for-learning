@@ -8,8 +8,8 @@ import java.util.concurrent.locks.LockSupport;
 public class SingleProducerSequencer {
 
     private final int ringBufferSize;
-    private long currentProducerIndex = -1;
-    private long slowestConsumerIndex = -1;
+    private volatile long currentProducerIndex = -1;
+    private volatile long slowestConsumerIndex = -1;
 
     public SingleProducerSequencer(int ringBufferSize) {
         this.ringBufferSize = ringBufferSize;
@@ -30,6 +30,10 @@ public class SingleProducerSequencer {
 
         this.currentProducerIndex = nextProducerIndex;
         return nextProducerIndex;
+    }
+
+    public void publish(int publishIndex){
+        this.currentProducerIndex = publishIndex;
     }
 
     public long getCurrentProducerIndex() {

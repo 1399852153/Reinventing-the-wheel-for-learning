@@ -1,7 +1,6 @@
-package disruptor;
+package disruptor.model;
 
 import disruptor.api.MyEventConsumer;
-import disruptor.model.OrderModel;
 
 public class OrderEventConsumer implements MyEventConsumer<OrderModel> {
 
