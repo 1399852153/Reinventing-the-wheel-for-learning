@@ -32,7 +32,7 @@ public class SingleProducerSequencer {
         return nextProducerSequence;
     }
 
-    public void publish(int publishIndex){
+    public void publish(long publishIndex){
         this.currentProducerSequence = publishIndex;
     }
 

@@ -22,6 +22,6 @@ public class Sequence {
     }
 
     public void setRealValue(long value){
-        this.value.lazySet(value);
+        this.value.set(value);
     }
 }

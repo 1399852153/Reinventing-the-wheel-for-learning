@@ -35,7 +35,7 @@ public class MyRingBuffer<T> {
         }
     }
 
-    public void publish(int index){
+    public void publish(Long index){
         this.singleProducerSequencer.publish(index);
         this.sequenceBarrier.signalAllWhenBlocking();
     }

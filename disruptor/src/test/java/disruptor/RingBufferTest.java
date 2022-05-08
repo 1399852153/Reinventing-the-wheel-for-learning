@@ -16,12 +16,13 @@ public class RingBufferTest {
 
         new Thread(eventProcessor).start();
 
-        int produceCount = 100;
+        int produceCount = 30;
         for(int i=0; i<produceCount; i++) {
             long nextIndex = singleProducerSequencer.next();
             OrderModel orderEvent = myRingBuffer.get(nextIndex);
             orderEvent.setMessage("message-"+i);
             orderEvent.setPrice(i * 10);
+            myRingBuffer.publish(nextIndex);
         }
     }
 }

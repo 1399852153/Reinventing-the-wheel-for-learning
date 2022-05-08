@@ -23,6 +23,7 @@ public class EventProcessor<T> implements Runnable{
 
         // 消费者线程主循环逻辑，不断的尝试获取事件并进行消费
         while(true) {
+            System.out.println("消费者线程主循环逻辑，不断的尝试获取事件并进行消费");
             try {
                 long availableConsumeIndex = this.sequenceBarrier.getAvailableConsumeSequence(this.currentConsumeSequence.getRealValue());
 
@@ -36,6 +37,7 @@ public class EventProcessor<T> implements Runnable{
 
                 // 更新当前消费者的消费的序列
                 this.currentConsumeSequence.setRealValue(nextConsumerIndex);
+                System.out.println("更新当前消费者的消费的序列:" + nextConsumerIndex);
             } catch (Exception e) {
                 // 发生异常，消费进度依然推进
                 this.currentConsumeSequence.setRealValue(nextConsumerIndex);
