@@ -9,7 +9,7 @@ import disruptor.api.MyEventProducer;
  */
 public class MyRingBuffer<T> {
 
-    private T[] elementList;
+    private final T[] elementList;
     private final SingleProducerSequencer singleProducerSequencer;
     private final MyEventProducer<T> myEventProducer;
     private final SequenceBarrier<T> sequenceBarrier;
@@ -21,6 +21,7 @@ public class MyRingBuffer<T> {
         this.myEventProducer = myEventProducer;
         this.sequenceBarrier = new SequenceBarrier<>(this);
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
+        this.elementList = (T[]) new Object[this.ringBufferSize];
         // 回环掩码
         this.mask = ringBufferSize - 1;
 
@@ -37,6 +38,14 @@ public class MyRingBuffer<T> {
     public void publish(int index){
         this.singleProducerSequencer.publish(index);
         this.sequenceBarrier.signalAllWhenBlocking();
+    }
+
+    public int getRingBufferSize() {
+        return ringBufferSize;
+    }
+
+    public void setConsumerSequence(Sequence consumerSequence){
+        this.singleProducerSequencer.setConsumerSequence(consumerSequence);
     }
 
     public SingleProducerSequencer getSingleProducerSequencer() {

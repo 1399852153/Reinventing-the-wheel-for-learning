@@ -8,8 +8,8 @@ import java.util.concurrent.locks.LockSupport;
 public class SingleProducerSequencer {
 
     private final int ringBufferSize;
-    private volatile long currentProducerIndex = -1;
-    private volatile long slowestConsumerIndex = -1;
+    private volatile long currentProducerSequence = -1;
+    private Sequence consumerSequence = new Sequence();
 
     public SingleProducerSequencer(int ringBufferSize) {
         this.ringBufferSize = ringBufferSize;
@@ -20,24 +20,28 @@ public class SingleProducerSequencer {
      * */
     public long next(){
         // 申请之后的生产者位点
-        long nextProducerIndex = this.currentProducerIndex + 1;
+        long nextProducerSequence = this.currentProducerSequence + 1;
 
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerIndex > this.slowestConsumerIndex + this.ringBufferSize){
+        while(nextProducerSequence > this.consumerSequence.getRealValue() + this.ringBufferSize){
             // 如果确实超过了一圈，则生产者无法获取队列空间，无限循环的park超时阻塞
             LockSupport.parkNanos(1L);
         }
 
-        this.currentProducerIndex = nextProducerIndex;
-        return nextProducerIndex;
+        this.currentProducerSequence = nextProducerSequence;
+        return nextProducerSequence;
     }
 
     public void publish(int publishIndex){
-        this.currentProducerIndex = publishIndex;
+        this.currentProducerSequence = publishIndex;
     }
 
-    public long getCurrentProducerIndex() {
-        return currentProducerIndex;
+    public void setConsumerSequence(Sequence consumerSequence){
+        this.consumerSequence = consumerSequence;
+    }
+
+    public long getCurrentProducerSequence() {
+        return currentProducerSequence;
     }
 
     public int getRingBufferSize() {

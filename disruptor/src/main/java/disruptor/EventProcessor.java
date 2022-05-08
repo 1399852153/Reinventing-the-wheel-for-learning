@@ -2,33 +2,29 @@ package disruptor;
 
 import disruptor.api.MyEventConsumer;
 
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-
 public class EventProcessor<T> implements Runnable{
 
-    private long currentConsumeIndex = 0;
-    private MyRingBuffer<T> myRingBuffer;
+    private final Sequence currentConsumeSequence = new Sequence(0);
+    private final MyRingBuffer<T> myRingBuffer;
     private final MyEventConsumer<T> myEventConsumer;
     private final SequenceBarrier<T> sequenceBarrier;
 
-    public EventProcessor(MyRingBuffer<T> myRingBuffer, MyEventConsumer<T> myEventConsumer, SequenceBarrier<T> sequenceBarrier) {
+    public EventProcessor(MyRingBuffer<T> myRingBuffer, MyEventConsumer<T> myEventConsumer) {
         this.myRingBuffer = myRingBuffer;
         this.myEventConsumer = myEventConsumer;
-        this.sequenceBarrier = sequenceBarrier;
+        this.sequenceBarrier = myRingBuffer.getSequenceBarrier();
     }
 
     @Override
     public void run() {
 
         // 下一个需要消费的下标
-        long nextConsumerIndex = currentConsumeIndex + 1;
+        long nextConsumerIndex = currentConsumeSequence.getRealValue() + 1;
 
         // 消费者线程主循环逻辑，不断的尝试获取事件并进行消费
         while(true) {
             try {
-                long availableConsumeIndex = this.sequenceBarrier.getAvailableConsumeIndex(this.currentConsumeIndex);
+                long availableConsumeIndex = this.sequenceBarrier.getAvailableConsumeSequence(this.currentConsumeSequence.getRealValue());
 
                 while (nextConsumerIndex <= availableConsumeIndex) {
                     // 取出可以消费的下标对应的事件，交给eventConsumer消费
@@ -37,13 +33,18 @@ public class EventProcessor<T> implements Runnable{
                     // 批处理，一次主循环消费N个事件（下标加1，获取下一个）
                     nextConsumerIndex++;
                 }
+
+                // 更新当前消费者的消费的序列
+                this.currentConsumeSequence.setRealValue(nextConsumerIndex);
             } catch (Exception e) {
                 // 发生异常，消费进度依然推进
-                this.currentConsumeIndex = nextConsumerIndex;
+                this.currentConsumeSequence.setRealValue(nextConsumerIndex);
                 nextConsumerIndex++;
             }
         }
     }
 
-
+    public Sequence getCurrentConsumeSequence() {
+        return currentConsumeSequence;
+    }
 }
