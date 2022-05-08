@@ -28,7 +28,6 @@ public class SingleProducerSequencer {
             LockSupport.parkNanos(1L);
         }
 
-        this.currentProducerSequence = nextProducerSequence;
         return nextProducerSequence;
     }
 
