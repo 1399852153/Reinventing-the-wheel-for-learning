@@ -19,7 +19,7 @@ public class EventProcessor<T> implements Runnable{
     public void run() {
 
         // 下一个需要消费的下标
-        long nextConsumerIndex = currentConsumeSequence.getRealValue() + 1;
+        long nextConsumerIndex = currentConsumeSequence.getRealValue();
 
         // 消费者线程主循环逻辑，不断的尝试获取事件并进行消费
         while(true) {

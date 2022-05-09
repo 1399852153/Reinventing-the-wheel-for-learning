@@ -22,8 +22,13 @@ public class SingleProducerSequencer {
         // 申请之后的生产者位点
         long nextProducerSequence = this.currentProducerSequence + 1;
 
+        boolean firstWaiting = true;
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence > this.consumerSequence.getRealValue() + this.ringBufferSize){
+        while(nextProducerSequence >= this.consumerSequence.getRealValue() + this.ringBufferSize){
+            if(firstWaiting){
+                firstWaiting = false;
+                System.out.println("生产者陷入阻塞");
+            }
             // 如果确实超过了一圈，则生产者无法获取队列空间，无限循环的park超时阻塞
             LockSupport.parkNanos(1L);
         }

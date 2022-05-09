@@ -23,7 +23,7 @@ public class MyRingBuffer<T> {
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
         // 回环掩码
-        this.mask = ringBufferSize - 1;
+        this.mask = ringBufferSize;
 
         // 预填充事件对象（后续生产者/消费者都只会更新事件对象，不会发生插入、删除等操作，避免GC）
         fillElementList();
@@ -56,7 +56,8 @@ public class MyRingBuffer<T> {
         return this.sequenceBarrier;
     }
 
-    public T get(long index){
-        return elementList[(int) (index % mask)];
+    public T get(long sequence){
+        int index = (int) (sequence % mask);
+        return elementList[index];
     }
 }

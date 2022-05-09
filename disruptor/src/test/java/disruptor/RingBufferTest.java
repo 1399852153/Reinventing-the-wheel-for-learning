@@ -16,7 +16,7 @@ public class RingBufferTest {
 
         new Thread(eventProcessor).start();
 
-        int produceCount = 30;
+        int produceCount = 1000;
         for(int i=0; i<produceCount; i++) {
             long nextIndex = singleProducerSequencer.next();
             OrderModel orderEvent = myRingBuffer.get(nextIndex);
