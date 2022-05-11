@@ -10,10 +10,10 @@ import disruptor.v2.SingleProducerSequencerV2;
 public class RingBufferV2Test {
 
     public static void main(String[] args) {
-        SingleProducerSequencerV2 singleProducerSequencer = new SingleProducerSequencerV2(3);
+        SingleProducerSequencerV2 singleProducerSequencer = new SingleProducerSequencerV2(10);
         MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(singleProducerSequencer,new OrderEventProducer());
 
-        int produceCount = 10;
+        int produceCount = 1000;
 
         {
             // 消费者1
@@ -33,14 +33,14 @@ public class RingBufferV2Test {
             new Thread(eventProcessor).start();
         }
 
-//        {
-//            // 消费者3
-//            EventProcessorV2<OrderModel> eventProcessor =
-//                    new EventProcessorV2<>(myRingBuffer, new OrderEventConsumer3());
-//            SequenceV2 consumeSequence = eventProcessor.getCurrentConsumeSequence();
-//            myRingBuffer.addConsumerSequence(consumeSequence);
-//            new Thread(eventProcessor).start();
-//        }
+        {
+            // 消费者3
+            EventProcessorV2<OrderModel> eventProcessor =
+                    new EventProcessorV2<>(myRingBuffer, new OrderEventConsumer(produceCount));
+            SequenceV2 consumeSequence = eventProcessor.getCurrentConsumeSequence();
+            myRingBuffer.addConsumerSequence(consumeSequence);
+            new Thread(eventProcessor).start();
+        }
 
         for(int i=0; i<produceCount; i++) {
             long nextIndex = singleProducerSequencer.next();

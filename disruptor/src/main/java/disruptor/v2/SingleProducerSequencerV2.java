@@ -28,7 +28,7 @@ public class SingleProducerSequencerV2 {
 
         boolean firstWaiting = true;
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence > this.getMinimumSequence(nextProducerSequence) + this.ringBufferSize){
+        while(nextProducerSequence > this.getMinimumSequence(nextProducerSequence) + (this.ringBufferSize-1)){
             if(firstWaiting){
                 firstWaiting = false;
                 LogUtil.logWithThreadName("生产者陷入阻塞");
@@ -65,6 +65,7 @@ public class SingleProducerSequencerV2 {
             minimumSequence = Math.min(minimumSequence, value);
         }
 
+        System.out.println("getMinimumSequence=" + minimumSequence);
         return minimumSequence;
     }
 }
