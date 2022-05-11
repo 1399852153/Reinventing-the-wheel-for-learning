@@ -1,5 +1,7 @@
 package disruptor.v1;
 
+import disruptor.util.LogUtil;
+
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -27,7 +29,7 @@ public class SingleProducerSequencerV1 {
         while(nextProducerSequence > this.consumerSequenceV1.getRealValue() + (this.ringBufferSize-1)){
             if(firstWaiting){
                 firstWaiting = false;
-                System.out.println("生产者陷入阻塞");
+                LogUtil.logWithThreadName("生产者陷入阻塞");
             }
             // 如果确实超过了一圈，则生产者无法获取队列空间，无限循环的park超时阻塞
             LockSupport.parkNanos(1L);

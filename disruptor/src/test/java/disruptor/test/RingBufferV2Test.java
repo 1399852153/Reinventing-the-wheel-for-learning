@@ -1,6 +1,7 @@
 package disruptor.test;
 
 import disruptor.model.*;
+import disruptor.util.LogUtil;
 import disruptor.v2.EventProcessorV2;
 import disruptor.v2.MyRingBufferV2;
 import disruptor.v2.SequenceV2;
@@ -12,7 +13,7 @@ public class RingBufferV2Test {
         SingleProducerSequencerV2 singleProducerSequencer = new SingleProducerSequencerV2(3);
         MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(singleProducerSequencer,new OrderEventProducer());
 
-        int produceCount = 20;
+        int produceCount = 10;
 
         {
             // 消费者1
@@ -46,7 +47,7 @@ public class RingBufferV2Test {
             OrderModel orderEvent = myRingBuffer.get(nextIndex);
             orderEvent.setMessage("message-"+i);
             orderEvent.setPrice(i * 10);
-            System.out.println("生产者发布事件：" + orderEvent);
+            LogUtil.logWithThreadName("生产者发布事件：" + orderEvent);
             myRingBuffer.publish(nextIndex);
         }
     }

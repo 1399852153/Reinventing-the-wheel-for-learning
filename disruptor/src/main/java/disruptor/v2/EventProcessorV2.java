@@ -1,6 +1,7 @@
 package disruptor.v2;
 
 import disruptor.api.MyEventConsumer;
+import disruptor.util.LogUtil;
 
 public class EventProcessorV2<T> implements Runnable{
 
@@ -36,7 +37,7 @@ public class EventProcessorV2<T> implements Runnable{
 
                 // 更新当前消费者的消费的序列
                 this.currentConsumeSequence.setRealValue(nextConsumerIndex);
-                System.out.println("更新当前消费者的消费的序列:" + nextConsumerIndex + "  "+ Thread.currentThread().getName());
+                LogUtil.logWithThreadName("更新当前消费者的消费的序列:" + nextConsumerIndex);
             } catch (Exception e) {
                 // 发生异常，消费进度依然推进
                 this.currentConsumeSequence.setRealValue(nextConsumerIndex);
