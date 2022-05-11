@@ -1,17 +1,17 @@
-package disruptor;
+package disruptor.v1;
 
 import java.util.concurrent.locks.LockSupport;
 
 /**
  * 单生产者序列器
  * */
-public class SingleProducerSequencer {
+public class SingleProducerSequencerV1 {
 
     private final int ringBufferSize;
     private volatile long currentProducerSequence = -1;
-    private Sequence consumerSequence = new Sequence();
+    private SequenceV1 consumerSequenceV1 = new SequenceV1();
 
-    public SingleProducerSequencer(int ringBufferSize) {
+    public SingleProducerSequencerV1(int ringBufferSize) {
         this.ringBufferSize = ringBufferSize;
     }
 
@@ -24,7 +24,7 @@ public class SingleProducerSequencer {
 
         boolean firstWaiting = true;
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence >= this.consumerSequence.getRealValue() + this.ringBufferSize){
+        while(nextProducerSequence >= this.consumerSequenceV1.getRealValue() + this.ringBufferSize){
             if(firstWaiting){
                 firstWaiting = false;
                 System.out.println("生产者陷入阻塞");
@@ -40,8 +40,8 @@ public class SingleProducerSequencer {
         this.currentProducerSequence = publishIndex;
     }
 
-    public void setConsumerSequence(Sequence consumerSequence){
-        this.consumerSequence = consumerSequence;
+    public void setConsumerSequence(SequenceV1 consumerSequenceV1){
+        this.consumerSequenceV1 = consumerSequenceV1;
     }
 
     public long getCurrentProducerSequence() {

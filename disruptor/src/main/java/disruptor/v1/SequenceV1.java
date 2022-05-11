@@ -1,19 +1,19 @@
-package disruptor;
+package disruptor.v1;
 
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 序列对象
  * */
-public class Sequence {
+public class SequenceV1 {
 
     private final AtomicLong value;
 
-    public Sequence() {
+    public SequenceV1() {
         this.value = new AtomicLong();
     }
 
-    public Sequence(long value) {
+    public SequenceV1(long value) {
         this.value = new AtomicLong(value);
     }
 
