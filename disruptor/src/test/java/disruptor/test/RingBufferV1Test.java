@@ -1,4 +1,4 @@
-package disruptor.test.v1;
+package disruptor.test;
 
 import disruptor.model.OrderEventConsumer;
 import disruptor.model.OrderEventProducer;
