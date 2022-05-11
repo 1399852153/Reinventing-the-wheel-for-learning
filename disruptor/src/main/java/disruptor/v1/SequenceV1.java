@@ -24,4 +24,11 @@ public class SequenceV1 {
     public void setRealValue(long value){
         this.value.set(value);
     }
+
+    @Override
+    public String toString() {
+        return "SequenceV1{" +
+                "value=" + value +
+                '}';
+    }
 }

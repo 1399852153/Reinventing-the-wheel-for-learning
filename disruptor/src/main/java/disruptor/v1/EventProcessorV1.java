@@ -4,7 +4,7 @@ import disruptor.api.MyEventConsumer;
 
 public class EventProcessorV1<T> implements Runnable{
 
-    private final SequenceV1 currentConsumeSequenceV1 = new SequenceV1(0);
+    private final SequenceV1 currentConsumeSequenceV1 = new SequenceV1(-1);
     private final MyRingBufferV1<T> myRingBufferV1;
     private final MyEventConsumer<T> myEventConsumer;
     private final SequenceBarrierV1<T> sequenceBarrierV1;
@@ -19,7 +19,7 @@ public class EventProcessorV1<T> implements Runnable{
     public void run() {
 
         // 下一个需要消费的下标
-        long nextConsumerIndex = currentConsumeSequenceV1.getRealValue();
+        long nextConsumerIndex = currentConsumeSequenceV1.getRealValue() + 1;
 
         // 消费者线程主循环逻辑，不断的尝试获取事件并进行消费
         while(true) {

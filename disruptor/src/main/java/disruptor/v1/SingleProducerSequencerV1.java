@@ -24,7 +24,7 @@ public class SingleProducerSequencerV1 {
 
         boolean firstWaiting = true;
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence >= this.consumerSequenceV1.getRealValue() + this.ringBufferSize){
+        while(nextProducerSequence > this.consumerSequenceV1.getRealValue() + (this.ringBufferSize-1)){
             if(firstWaiting){
                 firstWaiting = false;
                 System.out.println("生产者陷入阻塞");
