@@ -3,6 +3,6 @@ package disruptor.util;
 public class LogUtil {
 
     public static void logWithThreadName(String message){
-        LogUtil.logWithThreadName(message + " " + Thread.currentThread().getName());
+        System.out.println(message + " " + Thread.currentThread().getName());
     }
 }
