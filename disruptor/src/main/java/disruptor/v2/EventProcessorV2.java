@@ -10,10 +10,10 @@ public class EventProcessorV2<T> implements Runnable{
     private final MyEventConsumer<T> myEventConsumer;
     private final SequenceBarrierV2 sequenceBarrier;
 
-    public EventProcessorV2(MyRingBufferV2<T> myRingBuffer, MyEventConsumer<T> myEventConsumer) {
+    public EventProcessorV2(MyRingBufferV2<T> myRingBuffer, MyEventConsumer<T> myEventConsumer,SequenceBarrierV2 sequenceBarrier) {
         this.myRingBuffer = myRingBuffer;
         this.myEventConsumer = myEventConsumer;
-        this.sequenceBarrier = myRingBuffer.getSequenceBarrier();
+        this.sequenceBarrier = sequenceBarrier;
     }
 
     @Override
