@@ -10,8 +10,7 @@ import disruptor.v2.SingleProducerSequencerV2;
 public class RingBufferV2Test {
 
     public static void main(String[] args) {
-        SingleProducerSequencerV2 singleProducerSequencer = new SingleProducerSequencerV2(10);
-        MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(singleProducerSequencer,new OrderEventProducer());
+        MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(10,new OrderEventProducer());
 
         int produceCount = 1000;
 
@@ -43,7 +42,7 @@ public class RingBufferV2Test {
         }
 
         for(int i=0; i<produceCount; i++) {
-            long nextIndex = singleProducerSequencer.next();
+            long nextIndex = myRingBuffer.next();
             OrderModel orderEvent = myRingBuffer.get(nextIndex);
             orderEvent.setMessage("message-"+i);
             orderEvent.setPrice(i * 10);

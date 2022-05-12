@@ -3,6 +3,7 @@ package disruptor.v2;
 import disruptor.util.LogUtil;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.LockSupport;
 
@@ -12,11 +13,13 @@ import java.util.concurrent.locks.LockSupport;
 public class SingleProducerSequencerV2 {
 
     private final int ringBufferSize;
-    private SequenceV2 currentProducerSequence = new SequenceV2(-1);
-    private List<SequenceV2> gatingConsumerSequence = new ArrayList<>();
+    private final SequenceV2 currentProducerSequence = new SequenceV2(-1);
+    private final List<SequenceV2> gatingConsumerSequence = new ArrayList<>();
+    private final BlockingWaitStrategy blockingWaitStrategy;
 
-    public SingleProducerSequencerV2(int ringBufferSize) {
+    public SingleProducerSequencerV2(int ringBufferSize,BlockingWaitStrategy blockingWaitStrategy) {
         this.ringBufferSize = ringBufferSize;
+        this.blockingWaitStrategy = blockingWaitStrategy;
     }
 
     /**
@@ -42,14 +45,11 @@ public class SingleProducerSequencerV2 {
 
     public void publish(long publishIndex){
         this.currentProducerSequence.setRealValue(publishIndex);
+        this.blockingWaitStrategy.signalAllWhenBlocking();
     }
 
     public void addConsumerSequence(SequenceV2 consumerSequenceV2){
         this.gatingConsumerSequence.add(consumerSequenceV2);
-    }
-
-    public SequenceV2 getCurrentProducerSequence() {
-        return currentProducerSequence;
     }
 
     public int getRingBufferSize() {
@@ -57,7 +57,14 @@ public class SingleProducerSequencerV2 {
     }
 
     public SequenceBarrierV2 newBarrier(){
-        return new SequenceBarrierV2(this.currentProducerSequence);
+        return new SequenceBarrierV2(this.currentProducerSequence,new ArrayList<>());
+    }
+
+    /**
+     * 有依赖关系的栅栏（返回的barrier依赖于传入的barrier集合中最小的序列）
+     * */
+    public SequenceBarrierV2 newBarrier(SequenceV2... dependenceSequences){
+        return new SequenceBarrierV2(this.currentProducerSequence, new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
     /**

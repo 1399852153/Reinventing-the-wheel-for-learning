@@ -14,9 +14,10 @@ public class MyRingBufferV2<T> {
     private final MyEventProducer<T> myEventProducer;
     private final int ringBufferSize;
     private final int mask;
+    private final BlockingWaitStrategy blockingWaitStrategy = new BlockingWaitStrategy();
 
-    public MyRingBufferV2(SingleProducerSequencerV2 singleProducerSequencer, MyEventProducer<T> myEventProducer) {
-        this.singleProducerSequencer = singleProducerSequencer;
+    public MyRingBufferV2(int ringBufferSize, MyEventProducer<T> myEventProducer) {
+        this.singleProducerSequencer = new SingleProducerSequencerV2(ringBufferSize,this.blockingWaitStrategy);
         this.myEventProducer = myEventProducer;
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
@@ -35,6 +36,10 @@ public class MyRingBufferV2<T> {
 
     public void publish(Long index){
         this.singleProducerSequencer.publish(index);
+    }
+
+    public long next() {
+        return this.singleProducerSequencer.next();
     }
 
     public int getRingBufferSize() {
