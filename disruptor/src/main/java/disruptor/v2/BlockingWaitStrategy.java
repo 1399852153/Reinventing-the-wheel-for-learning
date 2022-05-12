@@ -1,6 +1,5 @@
 package disruptor.v2;
 
-import disruptor.util.LogUtil;
 import disruptor.v2.util.SequenceUtil;
 
 import java.util.List;
@@ -14,11 +13,6 @@ public class BlockingWaitStrategy {
 
     public long waitFor(long currentConsumeSequence, SequenceV2 currentProducerSequence,
                         List<SequenceV2> dependentSequences) throws InterruptedException {
-
-        if(!dependentSequences.isEmpty()){
-            LogUtil.logWithThreadName("66666");
-        }
-
         // 如果ringBuffer的生产者下标小于当前消费者所需的下标
         if (currentProducerSequence.getRealValue() < currentConsumeSequence) {
             // 说明目前 消费者消费速度大于生产者生产速度

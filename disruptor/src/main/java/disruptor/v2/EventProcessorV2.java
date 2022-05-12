@@ -36,10 +36,10 @@ public class EventProcessorV2<T> implements Runnable{
                 }
 
                 // 更新当前消费者的消费的序列
-                this.currentConsumeSequence.setRealValue(nextConsumerIndex);
-                LogUtil.logWithThreadName("更新当前消费者的消费的序列:" + nextConsumerIndex);
+                this.currentConsumeSequence.setRealValue(availableConsumeIndex);
+                LogUtil.logWithThreadName("更新当前消费者的消费的序列:" + availableConsumeIndex);
             } catch (Exception e) {
-                // 发生异常，消费进度依然推进
+                // 发生异常，消费进度依然推进（跳过这一批拉取的数据）
                 this.currentConsumeSequence.setRealValue(nextConsumerIndex);
                 nextConsumerIndex++;
             }

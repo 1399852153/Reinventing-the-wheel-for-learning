@@ -9,7 +9,7 @@ public class RingBufferV2Test {
     public static void main(String[] args) {
         MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(3,new OrderEventProducer());
 
-        int produceCount = 20;
+        int produceCount = 10;
 
         // 消费者1
         EventProcessorV2<OrderModel> eventProcessor =
@@ -17,17 +17,17 @@ public class RingBufferV2Test {
         SequenceV2 consumeSequence = eventProcessor.getCurrentConsumeSequence();
         myRingBuffer.addConsumerSequence(consumeSequence);
         new Thread(eventProcessor).start();
-//
-//
-//        {
-//            SequenceBarrierV2 step2Barrier = myRingBuffer.newBarrier(consumeSequence);
-//            // 消费者2
-//            EventProcessorV2<OrderModel> eventProcessor2 =
-//                    new EventProcessorV2<>(myRingBuffer, new OrderEventConsumer2(produceCount),step2Barrier);
-//            SequenceV2 consumeSequence2 = eventProcessor.getCurrentConsumeSequence();
-//            myRingBuffer.addConsumerSequence(consumeSequence2);
-//            new Thread(eventProcessor2).start();
-//        }
+
+
+        {
+            SequenceBarrierV2 step2Barrier = myRingBuffer.newBarrier(consumeSequence);
+            // 消费者2
+            EventProcessorV2<OrderModel> eventProcessor2 =
+                    new EventProcessorV2<>(myRingBuffer, new OrderEventConsumer2(produceCount),step2Barrier);
+            SequenceV2 consumeSequence2 = eventProcessor.getCurrentConsumeSequence();
+            myRingBuffer.addConsumerSequence(consumeSequence2);
+            new Thread(eventProcessor2).start();
+        }
 
 //        {
 //            // 消费者3
