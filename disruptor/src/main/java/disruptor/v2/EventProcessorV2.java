@@ -25,7 +25,7 @@ public class EventProcessorV2<T> implements Runnable{
         // 消费者线程主循环逻辑，不断的尝试获取事件并进行消费
         while(true) {
             try {
-                long availableConsumeIndex = this.sequenceBarrier.getAvailableConsumeSequence(this.currentConsumeSequence.getRealValue());
+                long availableConsumeIndex = this.sequenceBarrier.getAvailableConsumeSequence(nextConsumerIndex);
 
                 while (nextConsumerIndex <= availableConsumeIndex) {
                     // 取出可以消费的下标对应的事件，交给eventConsumer消费

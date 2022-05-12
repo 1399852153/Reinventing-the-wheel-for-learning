@@ -24,13 +24,13 @@ public class OrderEventConsumer2 implements MyEventConsumer<OrderModel> {
         }else{
             priceOrderStack.push(event.getPrice());
         }
-        LogUtil.logWithThreadName("OrderEventConsumer1 消费订单事件：sequence=" + sequence + "     " + event);
+        LogUtil.logWithThreadName("OrderEventConsumer2 消费订单事件：sequence=" + sequence + "     " + event);
 
         if(this.priceOrderStack.size() == this.maxConsumeTime){
             if(this.notOrdered){
-                LogUtil.logWithThreadName("OrderEventConsumer1 消费订单事件失败");
+                LogUtil.logWithThreadName("OrderEventConsumer2 消费订单事件失败");
             }else{
-                LogUtil.logWithThreadName("OrderEventConsumer1 消费订单事件完毕" + priceOrderStack);
+                LogUtil.logWithThreadName("OrderEventConsumer2 消费订单事件完毕" + priceOrderStack);
             }
         }
     }
