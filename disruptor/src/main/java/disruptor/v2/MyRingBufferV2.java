@@ -42,16 +42,8 @@ public class MyRingBufferV2<T> {
         return this.singleProducerSequencer.next();
     }
 
-    public int getRingBufferSize() {
-        return ringBufferSize;
-    }
-
     public void addConsumerSequence(SequenceV2 consumerSequenceV2){
         this.singleProducerSequencer.addConsumerSequence(consumerSequenceV2);
-    }
-
-    public SingleProducerSequencerV2 getSingleProducerSequencer() {
-        return singleProducerSequencer;
     }
 
     public SequenceBarrierV2 getSequenceBarrier(){

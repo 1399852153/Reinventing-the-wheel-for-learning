@@ -57,14 +57,14 @@ public class SingleProducerSequencerV2 {
     }
 
     public SequenceBarrierV2 newBarrier(){
-        return new SequenceBarrierV2(this.currentProducerSequence,new ArrayList<>());
+        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>());
     }
 
     /**
      * 有依赖关系的栅栏（返回的barrier依赖于传入的barrier集合中最小的序列）
      * */
     public SequenceBarrierV2 newBarrier(SequenceV2... dependenceSequences){
-        return new SequenceBarrierV2(this.currentProducerSequence, new ArrayList<>(Arrays.asList(dependenceSequences)));
+        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
     /**
@@ -76,7 +76,6 @@ public class SingleProducerSequencerV2 {
             minimumSequence = Math.min(minimumSequence, value);
         }
 
-        System.out.println("getMinimumSequence=" + minimumSequence);
         return minimumSequence;
     }
 }

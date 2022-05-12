@@ -10,7 +10,7 @@ import disruptor.v2.SingleProducerSequencerV2;
 public class RingBufferV2Test {
 
     public static void main(String[] args) {
-        MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(10,new OrderEventProducer());
+        MyRingBufferV2<OrderModel> myRingBuffer = new MyRingBufferV2<>(20,new OrderEventProducer());
 
         int produceCount = 1000;
 
