@@ -12,14 +12,12 @@ public class MyRingBufferV2<T> {
     private final T[] elementList;
     private final SingleProducerSequencerV2 singleProducerSequencer;
     private final MyEventProducer<T> myEventProducer;
-    private final SequenceBarrierV2<T> sequenceBarrierV1;
     private final int ringBufferSize;
     private final int mask;
 
     public MyRingBufferV2(SingleProducerSequencerV2 singleProducerSequencer, MyEventProducer<T> myEventProducer) {
         this.singleProducerSequencer = singleProducerSequencer;
         this.myEventProducer = myEventProducer;
-        this.sequenceBarrierV1 = new SequenceBarrierV2<>(this);
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
         // 回环掩码
@@ -37,7 +35,6 @@ public class MyRingBufferV2<T> {
 
     public void publish(Long index){
         this.singleProducerSequencer.publish(index);
-        this.sequenceBarrierV1.signalAllWhenBlocking();
     }
 
     public int getRingBufferSize() {
@@ -52,8 +49,8 @@ public class MyRingBufferV2<T> {
         return singleProducerSequencer;
     }
 
-    public SequenceBarrierV2<T> getSequenceBarrier(){
-        return this.sequenceBarrierV1;
+    public SequenceBarrierV2 getSequenceBarrier(){
+        return this.singleProducerSequencer.newBarrier();
     }
 
     public T get(long sequence){

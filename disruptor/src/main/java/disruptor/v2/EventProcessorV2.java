@@ -8,7 +8,7 @@ public class EventProcessorV2<T> implements Runnable{
     private final SequenceV2 currentConsumeSequence = new SequenceV2(-1);
     private final MyRingBufferV2<T> myRingBuffer;
     private final MyEventConsumer<T> myEventConsumer;
-    private final SequenceBarrierV2<T> sequenceBarrier;
+    private final SequenceBarrierV2 sequenceBarrier;
 
     public EventProcessorV2(MyRingBufferV2<T> myRingBuffer, MyEventConsumer<T> myEventConsumer) {
         this.myRingBuffer = myRingBuffer;

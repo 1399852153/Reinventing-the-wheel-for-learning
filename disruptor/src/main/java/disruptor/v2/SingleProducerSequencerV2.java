@@ -12,7 +12,7 @@ import java.util.concurrent.locks.LockSupport;
 public class SingleProducerSequencerV2 {
 
     private final int ringBufferSize;
-    private volatile long currentProducerSequence = -1;
+    private SequenceV2 currentProducerSequence = new SequenceV2(-1);
     private List<SequenceV2> gatingConsumerSequence = new ArrayList<>();
 
     public SingleProducerSequencerV2(int ringBufferSize) {
@@ -24,7 +24,7 @@ public class SingleProducerSequencerV2 {
      * */
     public long next(){
         // 申请之后的生产者位点
-        long nextProducerSequence = this.currentProducerSequence + 1;
+        long nextProducerSequence = this.currentProducerSequence.getRealValue() + 1;
 
         boolean firstWaiting = true;
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
@@ -41,19 +41,23 @@ public class SingleProducerSequencerV2 {
     }
 
     public void publish(long publishIndex){
-        this.currentProducerSequence = publishIndex;
+        this.currentProducerSequence.setRealValue(publishIndex);
     }
 
     public void addConsumerSequence(SequenceV2 consumerSequenceV2){
         this.gatingConsumerSequence.add(consumerSequenceV2);
     }
 
-    public long getCurrentProducerSequence() {
+    public SequenceV2 getCurrentProducerSequence() {
         return currentProducerSequence;
     }
 
     public int getRingBufferSize() {
         return ringBufferSize;
+    }
+
+    public SequenceBarrierV2 newBarrier(){
+        return new SequenceBarrierV2(this.currentProducerSequence);
     }
 
     /**
