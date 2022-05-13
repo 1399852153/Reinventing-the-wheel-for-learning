@@ -1,7 +1,7 @@
-package disruptor.v2;
+package disruptor.v3;
 
 import disruptor.util.LogUtil;
-import disruptor.v2.util.SequenceUtil;
+import disruptor.v3.util.SequenceUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,11 +16,11 @@ public class SingleProducerSequencerV2 {
     private final int ringBufferSize;
     private final SequenceV2 currentProducerSequence = new SequenceV2(-1);
     private final List<SequenceV2> gatingConsumerSequence = new ArrayList<>();
-    private final BlockingWaitStrategyV2 blockingWaitStrategyV2;
+    private final BlockingWaitStrategy blockingWaitStrategy;
 
-    public SingleProducerSequencerV2(int ringBufferSize, BlockingWaitStrategyV2 blockingWaitStrategyV2) {
+    public SingleProducerSequencerV2(int ringBufferSize, BlockingWaitStrategy blockingWaitStrategy) {
         this.ringBufferSize = ringBufferSize;
-        this.blockingWaitStrategyV2 = blockingWaitStrategyV2;
+        this.blockingWaitStrategy = blockingWaitStrategy;
     }
 
     /**
@@ -47,7 +47,7 @@ public class SingleProducerSequencerV2 {
 
     public void publish(long publishIndex){
         this.currentProducerSequence.setRealValue(publishIndex);
-        this.blockingWaitStrategyV2.signalAllWhenBlocking();
+        this.blockingWaitStrategy.signalAllWhenBlocking();
     }
 
     public void addConsumerSequence(SequenceV2 consumerSequenceV2){
@@ -59,14 +59,14 @@ public class SingleProducerSequencerV2 {
     }
 
     public SequenceBarrierV2 newBarrier(){
-        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategyV2,new ArrayList<>());
+        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>());
     }
 
     /**
      * 有依赖关系的栅栏（返回的barrier依赖于传入的barrier集合中最小的序列）
      * */
     public SequenceBarrierV2 newBarrier(SequenceV2... dependenceSequences){
-        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategyV2,new ArrayList<>(Arrays.asList(dependenceSequences)));
+        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
     /**

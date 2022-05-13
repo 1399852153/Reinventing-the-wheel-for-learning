@@ -1,4 +1,4 @@
-package disruptor.v2;
+package disruptor.v3;
 
 
 import disruptor.api.MyEventProducer;
@@ -14,10 +14,10 @@ public class MyRingBufferV2<T> {
     private final MyEventProducer<T> myEventProducer;
     private final int ringBufferSize;
     private final int mask;
-    private final BlockingWaitStrategyV2 blockingWaitStrategyV2 = new BlockingWaitStrategyV2();
+    private final BlockingWaitStrategy blockingWaitStrategy = new BlockingWaitStrategy();
 
     public MyRingBufferV2(int ringBufferSize, MyEventProducer<T> myEventProducer) {
-        this.singleProducerSequencer = new SingleProducerSequencerV2(ringBufferSize,this.blockingWaitStrategyV2);
+        this.singleProducerSequencer = new SingleProducerSequencerV2(ringBufferSize,this.blockingWaitStrategy);
         this.myEventProducer = myEventProducer;
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
