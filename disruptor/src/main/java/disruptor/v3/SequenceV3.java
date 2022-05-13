@@ -25,6 +25,10 @@ public class SequenceV3 {
         this.value.set(value);
     }
 
+    public boolean compareAndSet(long expect, long update){
+        return value.compareAndSet(expect,update);
+    }
+
     @Override
     public String toString() {
         return "SequenceV2{" +
