@@ -19,7 +19,7 @@ public class OrderEventConsumer implements MyEventConsumer<OrderModel> {
     @Override
     public void consume(OrderModel event, long sequence, boolean endOfBatch) {
         try {
-            Thread.sleep(2000L);
+            Thread.sleep(1000L);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
