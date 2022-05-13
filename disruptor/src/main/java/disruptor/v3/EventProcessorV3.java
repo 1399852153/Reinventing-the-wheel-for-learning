@@ -3,14 +3,14 @@ package disruptor.v3;
 import disruptor.api.MyEventConsumer;
 import disruptor.util.LogUtil;
 
-public class EventProcessorV2<T> implements Runnable{
+public class EventProcessorV3<T> implements Runnable{
 
-    private final SequenceV2 currentConsumeSequence = new SequenceV2(-1);
-    private final MyRingBufferV2<T> myRingBuffer;
+    private final SequenceV3 currentConsumeSequence = new SequenceV3(-1);
+    private final MyRingBufferV3<T> myRingBuffer;
     private final MyEventConsumer<T> myEventConsumer;
-    private final SequenceBarrierV2 sequenceBarrier;
+    private final SequenceBarrierV3 sequenceBarrier;
 
-    public EventProcessorV2(MyRingBufferV2<T> myRingBuffer, MyEventConsumer<T> myEventConsumer, SequenceBarrierV2 sequenceBarrier) {
+    public EventProcessorV3(MyRingBufferV3<T> myRingBuffer, MyEventConsumer<T> myEventConsumer, SequenceBarrierV3 sequenceBarrier) {
         this.myRingBuffer = myRingBuffer;
         this.myEventConsumer = myEventConsumer;
         this.sequenceBarrier = sequenceBarrier;
@@ -46,7 +46,7 @@ public class EventProcessorV2<T> implements Runnable{
         }
     }
 
-    public SequenceV2 getCurrentConsumeSequence() {
+    public SequenceV3 getCurrentConsumeSequence() {
         return currentConsumeSequence;
     }
 }

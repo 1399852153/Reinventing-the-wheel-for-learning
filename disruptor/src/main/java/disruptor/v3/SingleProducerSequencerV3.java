@@ -1,7 +1,7 @@
 package disruptor.v3;
 
 import disruptor.util.LogUtil;
-import disruptor.v3.util.SequenceUtil;
+import disruptor.v3.util.SequenceUtilV3;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,16 +11,16 @@ import java.util.concurrent.locks.LockSupport;
 /**
  * 单生产者序列器
  * */
-public class SingleProducerSequencerV2 {
+public class SingleProducerSequencerV3 {
 
     private final int ringBufferSize;
-    private final SequenceV2 currentProducerSequence = new SequenceV2(-1);
-    private final List<SequenceV2> gatingConsumerSequence = new ArrayList<>();
-    private final BlockingWaitStrategy blockingWaitStrategy;
+    private final SequenceV3 currentProducerSequence = new SequenceV3(-1);
+    private final List<SequenceV3> gatingConsumerSequence = new ArrayList<>();
+    private final BlockingWaitStrategyV3 blockingWaitStrategyV3;
 
-    public SingleProducerSequencerV2(int ringBufferSize, BlockingWaitStrategy blockingWaitStrategy) {
+    public SingleProducerSequencerV3(int ringBufferSize, BlockingWaitStrategyV3 blockingWaitStrategyV3) {
         this.ringBufferSize = ringBufferSize;
-        this.blockingWaitStrategy = blockingWaitStrategy;
+        this.blockingWaitStrategyV3 = blockingWaitStrategyV3;
     }
 
     /**
@@ -33,7 +33,7 @@ public class SingleProducerSequencerV2 {
         boolean firstWaiting = true;
 
         // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence > SequenceUtil.getMinimumSequence(nextProducerSequence,this.gatingConsumerSequence) + (this.ringBufferSize)){
+        while(nextProducerSequence > SequenceUtilV3.getMinimumSequence(nextProducerSequence,this.gatingConsumerSequence) + (this.ringBufferSize)){
             if(firstWaiting){
                 firstWaiting = false;
                 LogUtil.logWithThreadName("生产者陷入阻塞");
@@ -47,33 +47,33 @@ public class SingleProducerSequencerV2 {
 
     public void publish(long publishIndex){
         this.currentProducerSequence.setRealValue(publishIndex);
-        this.blockingWaitStrategy.signalAllWhenBlocking();
+        this.blockingWaitStrategyV3.signalAllWhenBlocking();
     }
 
-    public void addConsumerSequence(SequenceV2 consumerSequenceV2){
-        this.gatingConsumerSequence.add(consumerSequenceV2);
+    public void addConsumerSequence(SequenceV3 consumerSequenceV3){
+        this.gatingConsumerSequence.add(consumerSequenceV3);
     }
 
     public int getRingBufferSize() {
         return ringBufferSize;
     }
 
-    public SequenceBarrierV2 newBarrier(){
-        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>());
+    public SequenceBarrierV3 newBarrier(){
+        return new SequenceBarrierV3(this.currentProducerSequence,this.blockingWaitStrategyV3,new ArrayList<>());
     }
 
     /**
      * 有依赖关系的栅栏（返回的barrier依赖于传入的barrier集合中最小的序列）
      * */
-    public SequenceBarrierV2 newBarrier(SequenceV2... dependenceSequences){
-        return new SequenceBarrierV2(this.currentProducerSequence,this.blockingWaitStrategy,new ArrayList<>(Arrays.asList(dependenceSequences)));
+    public SequenceBarrierV3 newBarrier(SequenceV3... dependenceSequences){
+        return new SequenceBarrierV3(this.currentProducerSequence,this.blockingWaitStrategyV3,new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
     /**
      * 获得gatingSequenceList全部sequence与minimum中最小的序列值
      * */
     public long getMinimumSequence(long minimumSequence) {
-        for (SequenceV2 sequence : this.gatingConsumerSequence) {
+        for (SequenceV3 sequence : this.gatingConsumerSequence) {
             long value = sequence.getRealValue();
             minimumSequence = Math.min(minimumSequence, value);
         }

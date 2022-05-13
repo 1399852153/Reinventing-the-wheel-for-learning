@@ -7,17 +7,17 @@ import disruptor.api.MyEventProducer;
  * 仿disruptor 环形队列
  * @author shanreng
  */
-public class MyRingBufferV2<T> {
+public class MyRingBufferV3<T> {
 
     private final T[] elementList;
-    private final SingleProducerSequencerV2 singleProducerSequencer;
+    private final SingleProducerSequencerV3 singleProducerSequencer;
     private final MyEventProducer<T> myEventProducer;
     private final int ringBufferSize;
     private final int mask;
-    private final BlockingWaitStrategy blockingWaitStrategy = new BlockingWaitStrategy();
+    private final BlockingWaitStrategyV3 blockingWaitStrategyV3 = new BlockingWaitStrategyV3();
 
-    public MyRingBufferV2(int ringBufferSize, MyEventProducer<T> myEventProducer) {
-        this.singleProducerSequencer = new SingleProducerSequencerV2(ringBufferSize,this.blockingWaitStrategy);
+    public MyRingBufferV3(int ringBufferSize, MyEventProducer<T> myEventProducer) {
+        this.singleProducerSequencer = new SingleProducerSequencerV3(ringBufferSize,this.blockingWaitStrategyV3);
         this.myEventProducer = myEventProducer;
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
@@ -42,19 +42,19 @@ public class MyRingBufferV2<T> {
         return this.singleProducerSequencer.next();
     }
 
-    public SequenceBarrierV2 newBarrier() {
+    public SequenceBarrierV3 newBarrier() {
         return this.singleProducerSequencer.newBarrier();
     }
 
-    public SequenceBarrierV2 newBarrier(SequenceV2... dependenceSequences) {
+    public SequenceBarrierV3 newBarrier(SequenceV3... dependenceSequences) {
         return this.singleProducerSequencer.newBarrier(dependenceSequences);
     }
 
-    public void addConsumerSequence(SequenceV2 consumerSequenceV2){
-        this.singleProducerSequencer.addConsumerSequence(consumerSequenceV2);
+    public void addConsumerSequence(SequenceV3 consumerSequenceV3){
+        this.singleProducerSequencer.addConsumerSequence(consumerSequenceV3);
     }
 
-    public SequenceBarrierV2 getSequenceBarrier(){
+    public SequenceBarrierV3 getSequenceBarrier(){
         return this.singleProducerSequencer.newBarrier();
     }
 

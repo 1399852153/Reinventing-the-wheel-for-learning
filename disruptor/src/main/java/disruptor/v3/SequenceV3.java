@@ -5,15 +5,15 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * 序列对象
  * */
-public class SequenceV2 {
+public class SequenceV3 {
 
     private final AtomicLong value;
 
-    public SequenceV2() {
+    public SequenceV3() {
         this.value = new AtomicLong();
     }
 
-    public SequenceV2(long value) {
+    public SequenceV3(long value) {
         this.value = new AtomicLong(value);
     }
 

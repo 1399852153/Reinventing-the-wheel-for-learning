@@ -1,18 +1,18 @@
 package disruptor.v3;
 
-import disruptor.v3.util.SequenceUtil;
+import disruptor.v3.util.SequenceUtilV3;
 
 import java.util.List;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
-public class BlockingWaitStrategy {
+public class BlockingWaitStrategyV3 {
     private final Lock lock = new ReentrantLock();
     private final Condition processorNotifyCondition = lock.newCondition();
 
-    public long waitFor(long currentConsumeSequence, SequenceV2 currentProducerSequence,
-                        List<SequenceV2> dependentSequences) throws InterruptedException {
+    public long waitFor(long currentConsumeSequence, SequenceV3 currentProducerSequence,
+                        List<SequenceV3> dependentSequences) throws InterruptedException {
         // 如果ringBuffer的生产者下标小于当前消费者所需的下标
         if (currentProducerSequence.getRealValue() < currentConsumeSequence) {
             // 说明目前 消费者消费速度大于生产者生产速度
@@ -33,7 +33,7 @@ public class BlockingWaitStrategy {
         long availableSequence;
         if(!dependentSequences.isEmpty()){
             // 受制于屏障中的dependentSequences，用来控制当前消费者消费进度不得超过其链路上游的消费者进度
-            while ((availableSequence = SequenceUtil.getMinimumSequence(dependentSequences)) < currentConsumeSequence) {
+            while ((availableSequence = SequenceUtilV3.getMinimumSequence(dependentSequences)) < currentConsumeSequence) {
                 // 由于消费者消费速度一般会很快，所以这里使用自旋阻塞来等待上游消费者进度推进
                 // disruptor: ThreadHints.onSpinWait();
             }
