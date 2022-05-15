@@ -3,6 +3,8 @@ package disruptor.v3;
 
 import disruptor.api.MyEventProducer;
 
+import java.util.Arrays;
+
 /**
  * 仿disruptor 环形队列
  * @author shanreng
@@ -54,8 +56,17 @@ public class MyRingBufferV3<T> {
         this.singleProducerSequencer.addConsumerSequence(consumerSequenceV3);
     }
 
+    public void addConsumerSequence(SequenceV3... gatingSequences)
+    {
+        this.singleProducerSequencer.addConsumerSequenceList(Arrays.asList(gatingSequences));
+    }
+
     public SequenceBarrierV3 getSequenceBarrier(){
         return this.singleProducerSequencer.newBarrier();
+    }
+
+    public SequenceV3 getCurrentProducerSequence(){
+        return this.singleProducerSequencer.getCurrentProducerSequence();
     }
 
     public T get(long sequence){

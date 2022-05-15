@@ -54,6 +54,10 @@ public class SingleProducerSequencerV3 {
         this.gatingConsumerSequence.add(consumerSequenceV3);
     }
 
+    public void addConsumerSequenceList(List<SequenceV3> consumerSequenceV3){
+        this.gatingConsumerSequence.addAll(consumerSequenceV3);
+    }
+
     public int getRingBufferSize() {
         return ringBufferSize;
     }
@@ -69,15 +73,7 @@ public class SingleProducerSequencerV3 {
         return new SequenceBarrierV3(this.currentProducerSequence,this.blockingWaitStrategyV3,new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
-    /**
-     * 获得gatingSequenceList全部sequence与minimum中最小的序列值
-     * */
-    public long getMinimumSequence(long minimumSequence) {
-        for (SequenceV3 sequence : this.gatingConsumerSequence) {
-            long value = sequence.getRealValue();
-            minimumSequence = Math.min(minimumSequence, value);
-        }
-
-        return minimumSequence;
+    public SequenceV3 getCurrentProducerSequence() {
+        return currentProducerSequence;
     }
 }
