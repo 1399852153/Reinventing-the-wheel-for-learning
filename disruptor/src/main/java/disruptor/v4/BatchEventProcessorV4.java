@@ -1,11 +1,8 @@
-package disruptor.v4.api;
+package disruptor.v4;
 
 import disruptor.api.MyEventConsumer;
 import disruptor.util.LogUtil;
-import disruptor.v4.EventProcessorV4;
-import disruptor.v4.MyRingBufferV4;
-import disruptor.v4.SequenceBarrierV4;
-import disruptor.v4.SequenceV4;
+import disruptor.v4.api.EventProcessorV4;
 
 public class BatchEventProcessorV4<T> implements Runnable, EventProcessorV4 {
 

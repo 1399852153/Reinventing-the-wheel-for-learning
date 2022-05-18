@@ -1,6 +1,7 @@
 package disruptor.v4;
 
 import disruptor.api.MyEventConsumer;
+import disruptor.v4.api.EventProcessorV4;
 
 public class WorkerEventProcessorV4<T> implements Runnable, EventProcessorV4 {
 
