@@ -21,5 +21,5 @@ public interface ProducerSequencer {
 
     SequenceBarrierV4 newBarrier(SequenceV4... dependenceSequences);
 
-    SequenceV4 getCurrentProducerSequence();
+    SequenceV4 getCurrentMaxProducerSequence();
 }

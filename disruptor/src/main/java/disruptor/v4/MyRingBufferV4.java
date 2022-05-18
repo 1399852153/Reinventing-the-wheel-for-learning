@@ -66,7 +66,7 @@ public class MyRingBufferV4<T> {
     }
 
     public SequenceV4 getCurrentProducerSequence(){
-        return this.singleProducerSequencer.getCurrentProducerSequence();
+        return this.singleProducerSequencer.getCurrentMaxProducerSequence();
     }
 
     public T get(long sequence){

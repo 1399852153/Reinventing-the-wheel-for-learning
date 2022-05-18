@@ -82,7 +82,7 @@ public class SingleProducerSequencerV4 implements ProducerSequencer {
     }
 
     @Override
-    public SequenceV4 getCurrentProducerSequence() {
+    public SequenceV4 getCurrentMaxProducerSequence() {
         return currentProducerSequence;
     }
 }
