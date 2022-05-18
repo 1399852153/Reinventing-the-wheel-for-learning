@@ -8,13 +8,13 @@ import java.util.List;
 public class SequenceBarrierV4 {
 
     private final SequenceV4 currentProducerSequence;
-    private final BlockingWaitStrategyV4 blockingWaitStrategyV3;
+    private final BlockingWaitStrategyV4 blockingWaitStrategyV4;
     private final List<SequenceV4> dependentSequencesList;
 
-    public SequenceBarrierV4(SequenceV4 currentProducerSequence, BlockingWaitStrategyV4 blockingWaitStrategyV3,
+    public SequenceBarrierV4(SequenceV4 currentProducerSequence, BlockingWaitStrategyV4 blockingWaitStrategyV4,
                              List<SequenceV4> dependentSequencesList) {
         this.currentProducerSequence = currentProducerSequence;
-        this.blockingWaitStrategyV3 = blockingWaitStrategyV3;
+        this.blockingWaitStrategyV4 = blockingWaitStrategyV4;
         this.dependentSequencesList = dependentSequencesList;
     }
 
@@ -22,6 +22,6 @@ public class SequenceBarrierV4 {
      * 获得可用的最大消费者下标(如果没有)
      * */
     public long getAvailableConsumeSequence(long currentConsumeSequence) throws InterruptedException {
-        return blockingWaitStrategyV3.waitFor(currentConsumeSequence, currentProducerSequence,dependentSequencesList);
+        return blockingWaitStrategyV4.waitFor(currentConsumeSequence, currentProducerSequence,dependentSequencesList);
     }
 }

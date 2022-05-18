@@ -16,10 +16,10 @@ public class MyRingBufferV4<T> {
     private final MyEventProducer<T> myEventProducer;
     private final int ringBufferSize;
     private final int mask;
-    private final BlockingWaitStrategyV4 blockingWaitStrategyV3 = new BlockingWaitStrategyV4();
+    private final BlockingWaitStrategyV4 blockingWaitStrategyV4 = new BlockingWaitStrategyV4();
 
     public MyRingBufferV4(int ringBufferSize, MyEventProducer<T> myEventProducer) {
-        this.singleProducerSequencer = new SingleProducerSequencerV4(ringBufferSize,this.blockingWaitStrategyV3);
+        this.singleProducerSequencer = new SingleProducerSequencerV4(ringBufferSize,this.blockingWaitStrategyV4);
         this.myEventProducer = myEventProducer;
         this.ringBufferSize = singleProducerSequencer.getRingBufferSize();
         this.elementList = (T[]) new Object[this.ringBufferSize];
@@ -52,8 +52,8 @@ public class MyRingBufferV4<T> {
         return this.singleProducerSequencer.newBarrier(dependenceSequences);
     }
 
-    public void addConsumerSequence(SequenceV4 consumerSequenceV3){
-        this.singleProducerSequencer.addConsumerSequence(consumerSequenceV3);
+    public void addConsumerSequence(SequenceV4 consumerSequenceV4){
+        this.singleProducerSequencer.addConsumerSequence(consumerSequenceV4);
     }
 
     public void addConsumerSequence(SequenceV4... gatingSequences)
