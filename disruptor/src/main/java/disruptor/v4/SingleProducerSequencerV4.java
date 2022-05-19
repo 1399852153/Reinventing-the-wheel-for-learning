@@ -90,4 +90,13 @@ public class SingleProducerSequencerV4 implements ProducerSequencer {
     public boolean isAvailable(long sequence) {
         return sequence <= this.currentProducerSequence.getRealValue();
     }
+
+    @Override
+    public long getHighestPublishedSequence(long nextSequence, long availableSequence) {
+        // 该方法主要用于多生产者时，修正已发布的最高生产者序列号
+        // 多生产者时，其cursor不再代表已发布的最小序列号
+        // 因为可能还存在某个生产者线程next申请了一个序列，但还未publish过，此时别的生产者确publish了更大的序列，修改了cursor（增加了）
+        // 单生产者时，最大可消费序列就是availableSequence，仅仅作为一个兼容使用
+        return availableSequence;
+    }
 }

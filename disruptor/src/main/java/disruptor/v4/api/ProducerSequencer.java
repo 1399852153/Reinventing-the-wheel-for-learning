@@ -24,4 +24,7 @@ public interface ProducerSequencer {
     SequenceV4 getCurrentMaxProducerSequence();
 
     boolean isAvailable(long sequence);
+
+    long getHighestPublishedSequence(long nextSequence, long availableSequence);
+
 }
