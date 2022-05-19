@@ -7,6 +7,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.LockSupport;
 
+/**
+ * 多生产者序列器
+ * 线程安全，允许多个线程并发调用next、publish等方法
+ * */
 public class MultiProducerSequencer implements ProducerSequencer {
 
     private final int ringBufferSize;
@@ -57,43 +61,65 @@ public class MultiProducerSequencer implements ProducerSequencer {
 
     @Override
     public void publish(long publishIndex) {
-
+        setAvailable(publishIndex);
+        this.blockingWaitStrategyV4.signalAllWhenBlocking();
     }
 
     @Override
     public void addConsumerSequence(SequenceV4 consumerSequenceV4) {
-
+        this.gatingConsumerSequence.add(consumerSequenceV4);
     }
 
     @Override
     public void addConsumerSequenceList(List<SequenceV4> consumerSequenceV4) {
-
+        this.gatingConsumerSequence.addAll(consumerSequenceV4);
     }
 
     @Override
     public int getRingBufferSize() {
-        return 0;
+        return this.ringBufferSize;
     }
 
     @Override
     public SequenceBarrierV4 newBarrier() {
-        return null;
+        return new SequenceBarrierV4(this.currentMaxProducerSequence,this.blockingWaitStrategyV4,new ArrayList<>());
     }
 
     @Override
     public SequenceBarrierV4 newBarrier(SequenceV4... dependenceSequences) {
-        return null;
+        return new SequenceBarrierV4(this.currentMaxProducerSequence,this.blockingWaitStrategyV4,new ArrayList<>());
     }
 
     @Override
     public SequenceV4 getCurrentMaxProducerSequence() {
-        return null;
+        return this.currentMaxProducerSequence;
+    }
+
+    @Override
+    public boolean isAvailable(long sequence) {
+        int index = calculateIndex(sequence);
+        int flag = calculateAvailabilityFlag(sequence);
+        return this.availableBuffer[index] == flag;
     }
 
     private void initialiseAvailableBuffer() {
         for (int i = availableBuffer.length - 1; i >= 0; i--) {
             this.availableBuffer[i] = -1;
         }
+    }
+
+    private void setAvailable(long sequence){
+        int index = calculateIndex(sequence);
+        int flag = calculateAvailabilityFlag(sequence);
+        this.availableBuffer[index] = flag;
+    }
+
+    private int calculateAvailabilityFlag(long sequence) {
+        return (int) (sequence >>> indexShift);
+    }
+
+    private int calculateIndex(long sequence) {
+        return ((int) sequence) & indexMask;
     }
 
     public static int log2(int i) {
@@ -103,4 +129,16 @@ public class MultiProducerSequencer implements ProducerSequencer {
         }
         return r;
     }
+
+//    public static void main(String[] args) {
+//        int bufferSize = 8;
+//        int indexMask = bufferSize - 1;
+//        int indexShift = log2(bufferSize);
+//
+//        for(int sequence=0; sequence < 1000; sequence++){
+//            int index = sequence & indexMask;
+//            int flag = sequence >>> indexShift;
+//            System.out.println("sequence=" + sequence + " index=" + index + " flag=" + flag);
+//        }
+//    }
 }

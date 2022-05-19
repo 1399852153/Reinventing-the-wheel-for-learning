@@ -22,4 +22,6 @@ public interface ProducerSequencer {
     SequenceBarrierV4 newBarrier(SequenceV4... dependenceSequences);
 
     SequenceV4 getCurrentMaxProducerSequence();
+
+    boolean isAvailable(long sequence);
 }

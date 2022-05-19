@@ -85,4 +85,9 @@ public class SingleProducerSequencerV4 implements ProducerSequencer {
     public SequenceV4 getCurrentMaxProducerSequence() {
         return currentProducerSequence;
     }
+
+    @Override
+    public boolean isAvailable(long sequence) {
+        return sequence <= this.currentProducerSequence.getRealValue();
+    }
 }
