@@ -76,6 +76,11 @@ public class MultiProducerSequencer implements ProducerSequencer {
     }
 
     @Override
+    public void removeConsumerSequence(SequenceV4 consumerSequenceV4) {
+        this.gatingConsumerSequence.remove(consumerSequenceV4);
+    }
+
+    @Override
     public int getRingBufferSize() {
         return this.ringBufferSize;
     }

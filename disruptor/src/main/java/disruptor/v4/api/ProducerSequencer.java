@@ -15,6 +15,8 @@ public interface ProducerSequencer {
 
     void addConsumerSequenceList(List<SequenceV4> consumerSequenceV4);
 
+    void removeConsumerSequence(SequenceV4 consumerSequenceV4);
+
     int getRingBufferSize();
 
     SequenceBarrierV4 newBarrier();
