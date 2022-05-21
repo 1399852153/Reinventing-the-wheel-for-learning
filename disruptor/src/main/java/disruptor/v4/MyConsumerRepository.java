@@ -15,9 +15,29 @@
  */
 package disruptor.v4;
 
+import disruptor.v4.api.EventProcessorV4;
+
+import java.util.ArrayList;
+
 /**
  *
  */
 public class MyConsumerRepository<T> {
 
+    private final ArrayList<ConsumerInfo> consumerInfos = new ArrayList<>();
+
+    public ArrayList<ConsumerInfo> getConsumerInfos() {
+        return consumerInfos;
+    }
+
+    public void add(final EventProcessorV4 processor) {
+        final EventProcessorInfo<T> consumerInfo = new EventProcessorInfo<>(processor);
+        consumerInfos.add(consumerInfo);
+    }
+
+
+    public void add(final WorkerPoolV4<T> workerPool) {
+        final WorkerPoolInfo<T> workerPoolInfo = new WorkerPoolInfo<>(workerPool);
+        consumerInfos.add(workerPoolInfo);
+    }
 }
