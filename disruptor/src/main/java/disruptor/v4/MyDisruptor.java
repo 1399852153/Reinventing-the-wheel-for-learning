@@ -39,14 +39,16 @@ public class MyDisruptor<T> {
             final SequenceV4[] barrierSequences,
             final MyEventConsumer<T>[] myEventConsumers) {
 
-        final List<SequenceV4> processorSequences = new ArrayList<>(myEventConsumers.length);
+        final SequenceV4[] processorSequences = new SequenceV4[myEventConsumers.length];
         final SequenceBarrierV4 barrier = ringBuffer.newBarrier(barrierSequences);
 
+        int i=0;
         for(MyEventConsumer<T> myEventConsumer : myEventConsumers){
             final BatchEventProcessorV4<T> batchEventProcessor =
                     new BatchEventProcessorV4<T>(ringBuffer, myEventConsumer, barrier);
 
-            processorSequences.add(batchEventProcessor.getCurrentConsumeSequence());
+            processorSequences[i] = batchEventProcessor.getCurrentConsumeSequence();
+            i++;
 
             // consumer都保存起来，便于start启动
             consumerRepository.add(batchEventProcessor);
@@ -71,9 +73,13 @@ public class MyDisruptor<T> {
 
         final SequenceV4[] workerSequences = workerPool.getCurrentWorkerSequences();
 
-        updateGatingSequencesForNextInChain(barrierSequences, Arrays.asList(workerSequences));
+        updateGatingSequencesForNextInChain(barrierSequences, workerSequences);
 
-        return new EventHandlerGroup<T>(this, consumerRepository, Arrays.asList(workerSequences));
+        return new EventHandlerGroup<T>(this, consumerRepository,workerSequences);
+    }
+
+    public MyRingBufferV4<T> getRingBuffer() {
+        return ringBuffer;
     }
 
     public void start(){
@@ -82,8 +88,8 @@ public class MyDisruptor<T> {
                 .forEach(item->item.start(this.executor));
     }
 
-    private void updateGatingSequencesForNextInChain(final SequenceV4[] barrierSequences, final List<SequenceV4> processorSequences) {
-        if (!processorSequences.isEmpty()) {
+    private void updateGatingSequencesForNextInChain(final SequenceV4[] barrierSequences, final SequenceV4[] processorSequences) {
+        if (processorSequences.length != 0) {
             // 由于新的消费者通过ringBuffer.newBarrier(barrierSequences)，已经是依赖于之前ringBuffer中已有的消费者序列
             // 消费者即EventProcessor内部已经设置好了老的barrierSequences为依赖，因此可以将ringBuffer中已有的消费者序列去掉
             // 只需要保存，依赖当前消费者链条最末端的序列即可（也就是最慢的序列）

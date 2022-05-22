@@ -3,6 +3,7 @@ package disruptor.v4;
 
 import disruptor.api.MyEventProducer;
 import disruptor.api.ProducerType;
+import disruptor.v3.BlockingWaitStrategyV3;
 import disruptor.v4.api.ProducerSequencer;
 
 import java.util.Arrays;
@@ -18,9 +19,8 @@ public class MyRingBufferV4<T> {
     private final MyEventProducer<T> myEventProducer;
     private final int ringBufferSize;
     private final int mask;
-    private final BlockingWaitStrategyV4 blockingWaitStrategyV4 = new BlockingWaitStrategyV4();
 
-    public MyRingBufferV4(int ringBufferSize, ProducerSequencer producerSequencer , MyEventProducer<T> myEventProducer) {
+    public MyRingBufferV4(ProducerSequencer producerSequencer , MyEventProducer<T> myEventProducer) {
         this.producerSequencer = producerSequencer;
         this.myEventProducer = myEventProducer;
         this.ringBufferSize = this.producerSequencer.getRingBufferSize();
@@ -31,6 +31,7 @@ public class MyRingBufferV4<T> {
         // 预填充事件对象（后续生产者/消费者都只会更新事件对象，不会发生插入、删除等操作，避免GC）
         fillElementList();
     }
+
 
     private void fillElementList(){
         for(int i=0; i<this.elementList.length; i++){
@@ -89,11 +90,11 @@ public class MyRingBufferV4<T> {
         {
             case SINGLE: {
                 SingleProducerSequencerV4 singleProducerSequencerV4 = new SingleProducerSequencerV4(bufferSize, waitStrategyV4);
-                return new MyRingBufferV4<>(bufferSize, singleProducerSequencerV4, eventProducer);
+                return new MyRingBufferV4<>(singleProducerSequencerV4, eventProducer);
             }
             case MULTI: {
                 MultiProducerSequencer multiProducerSequencer = new MultiProducerSequencer(bufferSize, waitStrategyV4);
-                return new MyRingBufferV4<>(bufferSize, multiProducerSequencer, eventProducer);
+                return new MyRingBufferV4<>(multiProducerSequencer, eventProducer);
             }
             default:
                 throw new RuntimeException("un support producerType:" + producerType.toString());

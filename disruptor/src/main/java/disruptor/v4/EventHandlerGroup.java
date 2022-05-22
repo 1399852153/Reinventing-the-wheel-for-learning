@@ -9,15 +9,15 @@ public class EventHandlerGroup<T> {
 
     private final MyDisruptor<T> disruptor;
     private final MyConsumerRepository<T> myConsumerRepository;
-    private final List<SequenceV4> sequences;
+    private final SequenceV4[] sequences;
 
 
     public EventHandlerGroup(MyDisruptor<T> disruptor,
                              MyConsumerRepository<T> myConsumerRepository,
-                             List<SequenceV4> sequences) {
+                             SequenceV4[] sequences) {
         this.disruptor = disruptor;
         this.myConsumerRepository = myConsumerRepository;
-        this.sequences = new ArrayList<>(sequences);
+        this.sequences = sequences;
     }
 
     public final EventHandlerGroup<T> then(final MyEventConsumer<T>... myEventConsumers) {
@@ -25,7 +25,7 @@ public class EventHandlerGroup<T> {
     }
 
     public final EventHandlerGroup<T> handleEventsWith(final MyEventConsumer<T>... handlers) {
-        return disruptor.createEventProcessors((SequenceV4[]) sequences.toArray(), handlers);
+        return disruptor.createEventProcessors(sequences, handlers);
     }
 }
 

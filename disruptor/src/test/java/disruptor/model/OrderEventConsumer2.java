@@ -17,11 +17,11 @@ public class OrderEventConsumer2 implements MyEventConsumer<OrderModel> {
 
     @Override
     public void consume(OrderModel event, long sequence, boolean endOfBatch) {
-        try {
-            Thread.sleep(1000L);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+//        try {
+//            Thread.sleep(1000L);
+//        } catch (InterruptedException e) {
+//            e.printStackTrace();
+//        }
 
         if(!priceOrderStack.isEmpty() && event.getPrice() < priceOrderStack.peek()){
             LogUtil.logWithThreadName("price not ordered event=" + event);
