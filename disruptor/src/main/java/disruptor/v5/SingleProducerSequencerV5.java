@@ -19,6 +19,22 @@ public class SingleProducerSequencerV5 implements ProducerSequencer {
     private final List<SequenceV5> gatingConsumerSequence = new ArrayList<>();
     private final BlockingWaitStrategyV5 blockingWaitStrategyV5;
 
+    /**
+     * 解决伪共享 左半部分填充
+     * */
+    private long lp1, lp2, lp3, lp4, lp5, lp6, lp7;
+
+    /**
+     * 访问最频繁的两个变量，避免伪共享
+     * */
+    private long nextValue = SequenceV5.INITIAL_VALUE;
+    private long cachedValue = SequenceV5.INITIAL_VALUE;
+
+    /**
+     * 解决伪共享 右半部分填充
+     * */
+    private long rp1, rp2, rp3, rp4, rp5, rp6, rp7;
+
     public SingleProducerSequencerV5(int ringBufferSize, BlockingWaitStrategyV5 blockingWaitStrategyV5) {
         this.ringBufferSize = ringBufferSize;
         this.blockingWaitStrategyV5 = blockingWaitStrategyV5;
@@ -30,19 +46,36 @@ public class SingleProducerSequencerV5 implements ProducerSequencer {
     @Override
     public long next(){
         // 申请之后的生产者位点
-        long nextProducerSequence = this.currentProducerSequence.getRealValue() + 1;
+        long nextProducerSequence = this.nextValue + 1;
+        // 是否生产者超过消费者一圈的环绕临界点序列
+        long wrapPoint = nextProducerSequence - this.ringBufferSize;
+
+        // 获得已缓存的最小消费者序列
+        long cachedGatingSequence = this.cachedValue;
 
         boolean firstWaiting = true;
 
-        // 申请之后的生产者位点是否超过了最慢的消费者位点一圈
-        while(nextProducerSequence > SequenceUtilV5.getMinimumSequence(nextProducerSequence,this.gatingConsumerSequence) + (this.ringBufferSize)){
-            if(firstWaiting){
-                firstWaiting = false;
-                LogUtil.logWithThreadName("生产者陷入阻塞");
+        // 最小消费者序列cachedValue并不是实时获取的（因为在没有超过环绕点一圈时，是可以放心生产的）
+        // 实时获取反而会发起对消费者sequence强一致的读，逼迫消费者线程刷缓存（而这是不需要的）
+        if(wrapPoint > cachedGatingSequence){
+            long minSequence;
+
+            // 当生产者发现确实当前已经超过了一圈，则必须去读最新的消费者序列了
+            while(wrapPoint > (minSequence = SequenceUtilV5.getMinimumSequence(nextProducerSequence,this.gatingConsumerSequence))){
+                if(firstWaiting){
+                    firstWaiting = false;
+                    LogUtil.logWithThreadName("生产者陷入阻塞");
+                }
+                // 如果确实超过了一圈，则生产者无法获取队列空间，无限循环的park超时阻塞
+                LockSupport.parkNanos(1L);
             }
-            // 如果确实超过了一圈，则生产者无法获取队列空间，无限循环的park超时阻塞
-            LockSupport.parkNanos(1L);
+
+            // 满足条件了，则缓存最新的最小消费者序列
+            // 因为不是实时获取消费者的最小序列，可能cachedValue比之前的要前进很多
+            this.cachedValue = minSequence;
         }
+
+        this.nextValue = nextProducerSequence;
 
         return nextProducerSequence;
     }

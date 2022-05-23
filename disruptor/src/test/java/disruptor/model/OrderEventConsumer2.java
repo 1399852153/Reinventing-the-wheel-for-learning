@@ -40,4 +40,8 @@ public class OrderEventConsumer2 implements MyEventConsumer<OrderModel> {
             }
         }
     }
+
+    public void clear(){
+        this.priceOrderStack.clear();
+    }
 }
