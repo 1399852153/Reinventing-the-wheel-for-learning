@@ -87,12 +87,12 @@ public class MultiProducerSequencer implements ProducerSequencer {
 
     @Override
     public SequenceBarrierV5 newBarrier() {
-        return new SequenceBarrierV5(this.currentMaxProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
+        return new SequenceBarrierV5(this,this.currentMaxProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
     }
 
     @Override
     public SequenceBarrierV5 newBarrier(SequenceV5... dependenceSequences) {
-        return new SequenceBarrierV5(this.currentMaxProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
+        return new SequenceBarrierV5(this,this.currentMaxProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
     }
 
     @Override

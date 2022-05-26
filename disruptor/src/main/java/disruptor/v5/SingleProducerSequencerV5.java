@@ -108,7 +108,7 @@ public class SingleProducerSequencerV5 implements ProducerSequencer {
 
     @Override
     public SequenceBarrierV5 newBarrier(){
-        return new SequenceBarrierV5(this.currentProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
+        return new SequenceBarrierV5(this,this.currentProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>());
     }
 
     /**
@@ -116,7 +116,7 @@ public class SingleProducerSequencerV5 implements ProducerSequencer {
      * */
     @Override
     public SequenceBarrierV5 newBarrier(SequenceV5... dependenceSequences){
-        return new SequenceBarrierV5(this.currentProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>(Arrays.asList(dependenceSequences)));
+        return new SequenceBarrierV5(this,this.currentProducerSequence,this.blockingWaitStrategyV5,new ArrayList<>(Arrays.asList(dependenceSequences)));
     }
 
     @Override
