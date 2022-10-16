@@ -193,9 +193,12 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
                 }
 
             }
-            // 由于没有可执行的任务了。线程正常的退出
+            // getTask返回了null，说明没有可执行的任务或者因为idle超时、线程数超过配置等原因需要回收当前线程。
+            // 线程正常的退出，completedAbruptly为false
             completedAbruptly = false;
         }finally {
+            // getTask返回null，线程正常的退出，completedAbruptly值为false
+            // task.run()执行时抛出了异常/错误，直接跳出了主循环，此时completedAbruptly为初始化时的默认值true
             processWorkerExit(myWorker, completedAbruptly);
         }
 
@@ -218,7 +221,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
                 return null;
             }
 
-            // 获得当前线程个数
+            // 获得当前工作线程个数
             int workCount = this.workerCount.get();
 
             // 有两种情况需要指定超时时间的方式从阻塞队列workQueue中获取任务（即timed为true）
@@ -229,8 +232,30 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             //   所以此时也令timed为true，让这些线程在keepAliveTime时间内由于队列为空拉取不到任务而返回null，将其销毁
             boolean timed = allowCoreThreadTimeOut || workCount > corePoolSize;
 
-            // 有四种情况不需要往下执行，代表
-            // todo 待完善
+            // 有共四种情况不需要往下执行，代表
+            // 1 (workCount > maximumPoolSize && workCount > 1)
+            // 当前工作线程个数大于了指定的maximumPoolSize（可能是由于启动后通过setMaximumPoolSize调小了maximumPoolSize的值）
+            // 已经不符合线程池的配置参数约束了，要将多余的工作线程回收掉
+            // 且当前workCount > 1说明存在不止一个工作线程，意味着即使将当前工作线程回收后也还有其它工作线程能继续处理工作队列里的任务，直接返回null表示自己需要被回收
+
+            // 2 (workCount > maximumPoolSize && workCount <= 1 && workQueue.isEmpty())
+            // 当前工作线程个数大于了指定的maximumPoolSize（maximumPoolSize被设置为0了）
+            // 已经不符合线程池的配置参数约束了，要将多余的工作线程回收掉
+            // 但此时workCount<=1，说明将自己这个工作线程回收掉后就没有其它工作线程能处理工作队列里剩余的任务了
+            // 所以即使maximumPoolSize设置为0，也需要等待任务被处理完，工作队列为空之后才能回收当前线程，否则还会继续拉取剩余任务
+
+            // 3 (workCount <= maximumPoolSize && (timed && timedOut) && workCount > 1)
+            // workCount <= maximumPoolSize符合要求
+            // 但是timed && timedOut，说明timed判定命中，需要以poll的方式指定超时时间，并且最近一次拉取任务超时了timedOut=true
+            // 进入新的一次循环后timed && timedOut成立，说明当前worker线程处于idle状态等待任务超过了规定的keepAliveTime时间,需要回收当前线程
+            // 且当前workCount > 1说明存在不止一个工作线程，意味着即使将当前工作线程回收后也还有其它工作线程能继续处理工作队列里的任务，直接返回null表示自己需要被回收
+
+            // 4 (workCount <= maximumPoolSize && (timed && timedOut) && workQueue.isEmpty())
+            // workCount <= maximumPoolSize符合要求
+            // 但是timed && timedOut，说明timed判定命中，需要以poll的方式指定超时时间，并且最近一次拉取任务超时了timedOut=true
+            // 进入新的一次循环后timed && timedOut成立，说明当前worker线程处于idle状态等待任务超过了规定的keepAliveTime时间,需要回收当前线程
+            // 但此时workCount<=1，说明将自己这个工作线程回收掉后就没有其它工作线程能处理工作队列里剩余的任务了
+            // 所以即使timed && timedOut超时逻辑匹配，也需要等待任务被处理完，工作队列为空之后才能回收当前线程，否则还会继续拉取剩余任务
             if ((workCount > maximumPoolSize || (timed && timedOut))
                     && (workCount > 1 || workQueue.isEmpty())) {
                 if (compareAndDecrementWorkerCount(workCount)) {
@@ -266,6 +291,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
 
     /**
      * 处理worker线程退出
+     * @param myWorker 需要退出的工作线程对象
+     * @param completedAbruptly 是否是因为中断异常的原因，而需要回收
      * */
     private void processWorkerExit(MyWorker myWorker, boolean completedAbruptly) {
         // todo
@@ -391,6 +418,17 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
     }
 
+    public void setMaximumPoolSize(int maximumPoolSize) {
+        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
+            throw new IllegalArgumentException();
+        }
+        this.maximumPoolSize = maximumPoolSize;
+        if (this.workerCount.get() > maximumPoolSize) {
+            // todo
+//            interruptIdleWorkers();
+        }
+    }
+
     /**
      * 当创建worker出现异常失败时，对之前的操作进行回滚
      * 1 如果新创建的worker加入了workers集合，将其移除
@@ -425,7 +463,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
      * 任务执行后
      * */
     protected void afterExecute(Runnable r, Throwable t) {
-
+        // 默认为无意义的空方法
     }
 
 
