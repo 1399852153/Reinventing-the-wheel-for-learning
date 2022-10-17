@@ -50,7 +50,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
     /**
      * 当前线程池中存在的worker线程数量
      */
-    private AtomicInteger workerCount;
+    private final AtomicInteger workerCount = new AtomicInteger();
 
     /**
      * 维护当前存活的worker线程集合
@@ -67,6 +67,11 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
      * 跟踪线程池曾经有过的最大线程数量（只能在mainLock的并发保护下更新）
      */
     private int largestPoolSize;
+
+    /**
+     * 当前线程池已完成的任务数量
+     * */
+    private long completedTaskCount;
 
     /**
      * 是否允许核心线程在idle一定时间后被销毁（和非核心线程一样）
@@ -200,8 +205,12 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             // getTask返回null，线程正常的退出，completedAbruptly值为false
             // task.run()执行时抛出了异常/错误，直接跳出了主循环，此时completedAbruptly为初始化时的默认值true
             processWorkerExit(myWorker, completedAbruptly);
-        }
 
+            // processWorkerExit执行完成后，worker线程对应的run方法也会执行完毕
+            // 此时线程对象会进入终止态，等待操作系统回收
+            // 而且processWorkerExit方法内将传入的Worker从workers集合中移除，jvm中的对象也会因为不再被引用而被GC回收
+            // 此时，当前工作线程所占用的所有资源都已释放完毕
+        }
     }
 
     /**
@@ -295,7 +304,27 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
      * @param completedAbruptly 是否是因为中断异常的原因，而需要回收
      * */
     private void processWorkerExit(MyWorker myWorker, boolean completedAbruptly) {
-        // todo
+        if (completedAbruptly) {
+            // 如果completedAbruptly=true，说明是任务在run方法执行时出错导致的线程退出
+            // 而正常退出时completedAbruptly=false，在getTask中已经将workerCount的值减少了
+            decrementWorkerCount();
+        }
+
+        ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            // 线程池全局总完成任务数累加上要退出的工作线程已完成的任务数
+            completedTaskCount += myWorker.completedTasks;
+            // workers集合中将当前工作线程剔除
+            workers.remove(myWorker);
+
+            // completedTaskCount是long类型的，workers是HashSet，
+            // 都是非线程安全的，所以在mainLock的保护进行修改
+        } finally {
+            mainLock.unlock();
+        }
+
+        // todo 注意：jdk的实现中，在任意工作线程退出时都会检查是否满足线程池终止的条件，但v1版本在此省略了大量关于优雅停止的逻辑
     }
 
     /**
@@ -473,7 +502,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         final Thread thread;
         Runnable firstTask;
         volatile long completedTasks;
-
 
         public MyWorker(Runnable firstTask) {
             this.firstTask = firstTask;

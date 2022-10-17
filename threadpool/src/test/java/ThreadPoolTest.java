@@ -4,13 +4,18 @@ import java.util.concurrent.ThreadPoolExecutor;
 
 public class ThreadPoolTest {
 
-    public static void main(String[] args) {
-        ExecutorService threadPoolExecutor = Executors.newFixedThreadPool(5);
+    public static void main(String[] args) throws InterruptedException {
+        Thread t1 = getThread();
+        System.out.println(t1);
+    }
 
-        threadPoolExecutor.execute(()->{
+    public static Thread getThread() throws InterruptedException {
+        Thread t = new Thread(()->{
             System.out.println(666);
-            System.out.println(777);
-            System.out.println(888);
         });
+        t.start();
+
+        Thread.sleep(1000L);
+        return t;
     }
 }
