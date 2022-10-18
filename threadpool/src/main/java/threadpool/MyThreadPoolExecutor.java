@@ -1,5 +1,7 @@
 package threadpool;
 
+import java.util.concurrent.BlockingQueue;
+
 /**
  * @author xiongyx
  * @date 2021/5/7
@@ -22,4 +24,8 @@ public interface MyThreadPoolExecutor {
      */
     void shutdown();
 
+    /**
+     * 获得当前线程池的工作队列
+     * */
+    BlockingQueue<Runnable> getQueue();
 }

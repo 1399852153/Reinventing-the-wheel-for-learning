@@ -5,8 +5,8 @@ import threadpool.MyThreadPoolExecutor;
 
 import java.util.HashSet;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
@@ -206,11 +206,45 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             // task.run()执行时抛出了异常/错误，直接跳出了主循环，此时completedAbruptly为初始化时的默认值true
             processWorkerExit(myWorker, completedAbruptly);
 
-            // processWorkerExit执行完成后，worker线程对应的run方法也会执行完毕
+            // processWorkerExit执行完成后，worker线程对应的run方法(run->runWorker)也会执行完毕
             // 此时线程对象会进入终止态，等待操作系统回收
             // 而且processWorkerExit方法内将传入的Worker从workers集合中移除，jvm中的对象也会因为不再被引用而被GC回收
             // 此时，当前工作线程所占用的所有资源都已释放完毕
         }
+    }
+
+    public ThreadFactory getThreadFactory() {
+        return threadFactory;
+    }
+
+    public void allowCoreThreadTimeOut(boolean value) {
+        if (value && keepAliveTime <= 0) {
+            throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+        }
+        // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
+        if (value != allowCoreThreadTimeOut) {
+            allowCoreThreadTimeOut = value;
+            // todo
+//            if (value) {
+//                interruptIdleWorkers();
+//            }
+        }
+    }
+
+    public void setMaximumPoolSize(int maximumPoolSize) {
+        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
+            throw new IllegalArgumentException();
+        }
+        this.maximumPoolSize = maximumPoolSize;
+        if (this.workerCount.get() > maximumPoolSize) {
+            // todo
+//            interruptIdleWorkers();
+        }
+    }
+
+    @Override
+    public BlockingQueue<Runnable> getQueue() {
+        return this.workQueue;
     }
 
     /**
@@ -429,35 +463,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         } while (!compareAndDecrementWorkerCount(this.workerCount.get()));
     }
 
-    public ThreadFactory getThreadFactory() {
-        return threadFactory;
-    }
-
-    public void allowCoreThreadTimeOut(boolean value) {
-        if (value && keepAliveTime <= 0) {
-            throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
-        }
-        // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
-        if (value != allowCoreThreadTimeOut) {
-            allowCoreThreadTimeOut = value;
-            // todo
-//            if (value) {
-//                interruptIdleWorkers();
-//            }
-        }
-    }
-
-    public void setMaximumPoolSize(int maximumPoolSize) {
-        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
-            throw new IllegalArgumentException();
-        }
-        this.maximumPoolSize = maximumPoolSize;
-        if (this.workerCount.get() > maximumPoolSize) {
-            // todo
-//            interruptIdleWorkers();
-        }
-    }
-
     /**
      * 当创建worker出现异常失败时，对之前的操作进行回滚
      * 1 如果新创建的worker加入了workers集合，将其移除
@@ -513,6 +518,70 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         @Override
         public void run() {
             runWorker(this);
+        }
+    }
+
+    // ============================== jdk默认提供的4种拒绝策略 ===============================================
+    /**
+     * 抛出拒绝执行异常的拒绝策略
+     * 评价：能让提交任务的一方感知到异常的策略，比较通用，也是jdk默认的拒绝策略
+     * */
+    public static class MyAbortPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // 直接抛出异常
+            throw new RejectedExecutionException("Task " + command.toString() +
+                    " rejected from " + executor.toString());
+        }
+    }
+
+    /**
+     * 令调用者线程自己执行command任务的拒绝策略
+     * 评价：在线程池压力过大时，让提交任务的线程自己执行该任务（异步变同步），
+     *      能够有效地降低线程池的压力，也不会出现任务丢失，但可能导致整体业务吞吐量大幅降低
+     * */
+    public static class MyCallerRunsPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // v1版本暂不支持shutdown功能
+//        if (!executor.isShutdown()) {
+//            command.run();
+//        }
+
+            // 令调用者线程自己执行command任务
+            command.run();
+        }
+    }
+
+    /**
+     * 直接丢弃任务的拒绝策略
+     * 评价：简单的直接丢弃任务，适用于对任务执行成功率要求不高的场合
+     * */
+    public static class MyDiscardPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // 什么也不做的，直接返回
+            // 效果就是command任务被无声无息的丢弃了，没有异常也没有
+        }
+    }
+
+    /**
+     * 丢弃当前工作队列中最早入队的任务，然后将当前任务重新提交
+     * 评价：适用于后出现的任务能够完全代替之前任务的场合(追求最终一致性)
+     * */
+    public static class MyDiscardOldestPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // v1版本暂不支持shutdown功能
+//            if (!executorisShutdown()) {
+//                executor.getQueue().poll();
+//                executor.execute(command);
+//            }
+
+            // 把工作队列里最早入队的任务通过poll拿出来（但是不处理，直接丢弃）
+            executor.getQueue().poll();
+            // 尝试重新提交command任务（可能并发提交任务过多还会被拒绝，再次重复此拒绝流程即可）
+            executor.execute(command);
         }
     }
 }
