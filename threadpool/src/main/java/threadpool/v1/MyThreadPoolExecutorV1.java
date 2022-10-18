@@ -156,7 +156,44 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
 
     }
 
-    public void runWorker(MyWorker myWorker) {
+    public ThreadFactory getThreadFactory() {
+        return threadFactory;
+    }
+
+    public void allowCoreThreadTimeOut(boolean value) {
+        if (value && keepAliveTime <= 0) {
+            throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+        }
+        // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
+        if (value != allowCoreThreadTimeOut) {
+            allowCoreThreadTimeOut = value;
+            // todo
+//            if (value) {
+//                interruptIdleWorkers();
+//            }
+        }
+    }
+
+    public void setMaximumPoolSize(int maximumPoolSize) {
+        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
+            throw new IllegalArgumentException();
+        }
+        this.maximumPoolSize = maximumPoolSize;
+        if (this.workerCount.get() > maximumPoolSize) {
+            // todo
+//            interruptIdleWorkers();
+        }
+    }
+
+    @Override
+    public BlockingQueue<Runnable> getQueue() {
+        return this.workQueue;
+    }
+
+    /**
+     * 启动worker工作线程
+     * */
+    private void runWorker(MyWorker myWorker) {
         // 时worker线程的run方法调用的，此时的current线程的是worker线程
         Thread workerThread = Thread.currentThread();
         Runnable task = myWorker.firstTask;
@@ -211,40 +248,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             // 而且processWorkerExit方法内将传入的Worker从workers集合中移除，jvm中的对象也会因为不再被引用而被GC回收
             // 此时，当前工作线程所占用的所有资源都已释放完毕
         }
-    }
-
-    public ThreadFactory getThreadFactory() {
-        return threadFactory;
-    }
-
-    public void allowCoreThreadTimeOut(boolean value) {
-        if (value && keepAliveTime <= 0) {
-            throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
-        }
-        // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
-        if (value != allowCoreThreadTimeOut) {
-            allowCoreThreadTimeOut = value;
-            // todo
-//            if (value) {
-//                interruptIdleWorkers();
-//            }
-        }
-    }
-
-    public void setMaximumPoolSize(int maximumPoolSize) {
-        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
-            throw new IllegalArgumentException();
-        }
-        this.maximumPoolSize = maximumPoolSize;
-        if (this.workerCount.get() > maximumPoolSize) {
-            // todo
-//            interruptIdleWorkers();
-        }
-    }
-
-    @Override
-    public BlockingQueue<Runnable> getQueue() {
-        return this.workQueue;
     }
 
     /**
