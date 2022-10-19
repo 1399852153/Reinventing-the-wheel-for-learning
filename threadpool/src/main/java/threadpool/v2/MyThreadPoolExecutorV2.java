@@ -1,22 +1,21 @@
-package threadpool.v1;
+package threadpool.v2;
 
 import threadpool.MyRejectedExecutionHandler;
 import threadpool.MyThreadPoolExecutor;
+import threadpool.v1.MyThreadPoolExecutorV1;
 
+import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * v1版本只实现
  * @author xiongyx
  * @date 2021/5/7
  */
-public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
+public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
     /**
      * 指定的核心线程数量
@@ -77,14 +76,30 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
     /**
      * 默认的拒绝策略
      */
-    private static final MyRejectedExecutionHandler defaultHandler = new MyAbortPolicy();
+    private static final MyRejectedExecutionHandler defaultHandler = new MyThreadPoolExecutorV1.MyAbortPolicy();
 
     /**
      * 当前线程池中存在的worker线程数量
      */
     private final AtomicInteger workerCount = new AtomicInteger();
 
-    public MyThreadPoolExecutorV1(int corePoolSize,
+    /**
+     * 当前线程池的状态
+     */
+    private final AtomicInteger poolStatus = new AtomicInteger();
+
+    /**
+     * 线程池状态poolStatus常量（状态只会由小到大，单调递增）
+     * todo 待完善，状态迁移图  说明什么时候会从A状态到B状态
+     * */
+    private static final int RUNNING = -1;
+    private static final int SHUTDOWN = 0;
+    private static final int STOP = -1;
+    private static final int TIDYING = 2;
+    private static final int TERMINATED = 3;
+
+
+    public MyThreadPoolExecutorV2(int corePoolSize,
                                   int maximumPoolSize,
                                   long keepAliveTime,
                                   TimeUnit unit,
@@ -154,7 +169,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
     @Override
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
-
+        // 当一个任务从工作队列中被成功移除，可能此时工作队列为空。尝试判断是否满足线程池中止条件
+        tryTerminate();
         return removed;
     }
 
@@ -169,10 +185,9 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
         if (value != allowCoreThreadTimeOut) {
             allowCoreThreadTimeOut = value;
-            // todo
-//            if (value) {
-//                interruptIdleWorkers();
-//            }
+            if (value) {
+                interruptIdleWorkers();
+            }
         }
     }
 
@@ -182,14 +197,47 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
         this.maximumPoolSize = maximumPoolSize;
         if (this.workerCount.get() > maximumPoolSize) {
-            // todo
-//            interruptIdleWorkers();
+            interruptIdleWorkers();
         }
     }
 
     @Override
     public BlockingQueue<Runnable> getQueue() {
         return this.workQueue;
+    }
+
+    /**
+     * 关闭线程池（不再接收新任务，但已提交的任务会全部被执行）
+     * 但不会等待任务彻底的执行完成（awaitTermination）
+     */
+    public void shutdown() {
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            checkShutdownAccess();
+            advanceRunState(SHUTDOWN);
+            interruptIdleWorkers();
+            onShutdown(); // hook for ScheduledThreadPoolExecutor
+        } finally {
+            mainLock.unlock();
+        }
+        tryTerminate();
+    }
+
+    public List<Runnable> shutdownNow() {
+        List<Runnable> tasks;
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            checkShutdownAccess();
+            advanceRunState(STOP);
+            interruptWorkers();
+            tasks = drainQueue();
+        } finally {
+            mainLock.unlock();
+        }
+        tryTerminate();
+        return tasks;
     }
 
     /**
@@ -490,6 +538,90 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
     }
 
+    private void interruptIdleWorkers() {
+        // 默认打断所有idle状态的工作线程
+        interruptIdleWorkers(false);
+    }
+
+    private void interruptIdleWorkers(boolean onlyOne) {
+        // todo
+    }
+
+    private void interruptWorkers() {
+        // todo
+    }
+
+    private void checkShutdownAccess() {
+        // todo
+    }
+
+    private void advanceRunState(int targetState) {
+        while(true) {
+            // 获得当前的线程池状态
+            int poolStatus = this.poolStatus.get();
+            // 1 （poolStatus >= targetState）如果当前线程池状态不比传入的targetState小
+            // 代表当前状态已经比参数要制定的更加快(或者至少已经处于对应阶段了)，则无需更新poolStatus的状态
+            // 2  (poolStatus.compareAndSet)，cas的将poolStatus更新为targetState
+            // 如果返回true则说明cas更新成功直接返回
+            // 如果返回false说明cas争抢失败，再次进入while循环重试
+            if (poolStatus >= targetState ||
+                    this.poolStatus.compareAndSet(poolStatus, targetState)) {
+                break;
+            }
+        }
+    }
+
+    /**
+     * 将工作队列中的任务全部转移出来
+     * 用于shutdownNow紧急关闭线程池时将未完成的任务返回给调用者，避免任务丢失
+     * */
+    private List<Runnable> drainQueue() {
+        BlockingQueue<Runnable> queue = this.workQueue;
+        ArrayList<Runnable> taskList = new ArrayList<>();
+        queue.drainTo(taskList);
+        // 通常情况下，普通的阻塞队列的drainTo方法可以一次性的把所有元素都转移到taskList中
+        // 但jdk的DelayedQueue或者一些自定义的阻塞队列，drainTo方法无法转移所有的元素（比如DelayedQueue的drainTo方法只能转移已经不需要延迟的元素，即getDelay()<=0）
+        // 所以在这里打一个补丁逻辑：如果drainTo方法执行后工作队列依然不为空，则通过更基础的remove方法把队列中剩余元素一个一个的循环放到taskList中
+        if (!queue.isEmpty()) {
+            for (Runnable r : queue.toArray(new Runnable[0])) {
+                if (queue.remove(r))
+                    taskList.add(r);
+            }
+        }
+        return taskList;
+    }
+
+    final void tryTerminate() {
+//        for (;;) {
+//            int c = ctl.get();
+//            if (isRunning(c) ||
+//                    runStateAtLeast(c, TIDYING) ||
+//                    (runStateOf(c) == SHUTDOWN && ! workQueue.isEmpty()))
+//                return;
+//            if (workerCountOf(c) != 0) { // Eligible to terminate
+//                interruptIdleWorkers(ONLY_ONE);
+//                return;
+//            }
+//
+//            final ReentrantLock mainLock = this.mainLock;
+//            mainLock.lock();
+//            try {
+//                if (ctl.compareAndSet(c, ctlOf(TIDYING, 0))) {
+//                    try {
+//                        terminated();
+//                    } finally {
+//                        ctl.set(ctlOf(TERMINATED, 0));
+//                        termination.signalAll();
+//                    }
+//                    return;
+//                }
+//            } finally {
+//                mainLock.unlock();
+//            }
+//            // else retry on failed CAS
+//        }
+    }
+
     // ===================== 留给子类做拓展的方法 =======================
     /**
      * 任务执行前
@@ -505,6 +637,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         // 默认为无意义的空方法
     }
 
+    void onShutdown() {
+    }
 
     // =============================== worker线程内部类 =====================================
     private final class MyWorker implements Runnable{

@@ -18,11 +18,6 @@ public interface MyThreadPoolExecutor {
      */
     boolean remove(Runnable task);
 
-    /**
-     * 关闭线程池（不再接收新任务，但已提交的任务会全部被执行）
-     * 但不会等待任务彻底的执行完成（awaitTermination）
-     */
-    void shutdown();
 
     /**
      * 获得当前线程池的工作队列
