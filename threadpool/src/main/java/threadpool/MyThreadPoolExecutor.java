@@ -18,9 +18,13 @@ public interface MyThreadPoolExecutor {
      */
     boolean remove(Runnable task);
 
-
     /**
      * 获得当前线程池的工作队列
      * */
     BlockingQueue<Runnable> getQueue();
+
+    /**
+     * 当前线程池是否是shutdown状态
+     * */
+    boolean isShutdown();
 }

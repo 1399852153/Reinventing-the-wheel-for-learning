@@ -187,13 +187,15 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
     }
 
-    public void setCorePoolSize(int corePoolSize) {
-        // todo
-    }
-
     @Override
     public BlockingQueue<Runnable> getQueue() {
         return this.workQueue;
+    }
+
+    @Override
+    public boolean isShutdown() {
+        // v1版本不支持shutdown优雅关闭，永远返回false
+        return false;
     }
 
     /**
