@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.AbstractQueuedSynchronizer;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -72,6 +73,11 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      * 是否允许核心线程在idle一定时间后被销毁（和非核心线程一样）
      * */
     private volatile boolean allowCoreThreadTimeOut;
+
+    /**
+     * 用于shutdown/shutdownNow时，检查当前调用者是否有权限去通过interrupt方法去中断对应工作线程
+     * */
+    private static final RuntimePermission shutdownPerm = new RuntimePermission("modifyThread");
 
     /**
      * 默认的拒绝策略
@@ -212,9 +218,13 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      */
     public void shutdown() {
         final ReentrantLock mainLock = this.mainLock;
+
+        // shutdown操作中涉及大量的资源访问和更新，直接通过互斥锁防并发
         mainLock.lock();
         try {
+            // 用于shutdown/shutdownNow时的安全访问权限
             checkShutdownAccess();
+            // 将线程池状态从RUNNING推进到SHUTDOWN
             advanceRunState(SHUTDOWN);
             interruptIdleWorkers();
             onShutdown(); // hook for ScheduledThreadPoolExecutor
@@ -224,20 +234,44 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         tryTerminate();
     }
 
+    /**
+     * 立即关闭线程池（不再接收新任务，工作队列中未完成的任务会以列表的形式返回）
+     * @return 当前工作队列中未完成的任务
+     * */
     public List<Runnable> shutdownNow() {
         List<Runnable> tasks;
+
         final ReentrantLock mainLock = this.mainLock;
+
+        // shutdown操作中涉及大量的资源访问和更新，直接通过互斥锁防并发
         mainLock.lock();
         try {
+            // 用于shutdown/shutdownNow时的安全访问权限
             checkShutdownAccess();
+            // 将线程池状态从RUNNING推进到STOP
             advanceRunState(STOP);
             interruptWorkers();
+
+            // 将工作队列中未完成的任务提取出来(会清空线程池的workQueue)
             tasks = drainQueue();
         } finally {
             mainLock.unlock();
         }
         tryTerminate();
         return tasks;
+    }
+
+    /**
+     * 调用者会被阻塞，直到线程池变为shutdown状态
+     * 通过参数可以控制被阻塞等待的超时时间
+     * */
+    public boolean awaitTermination(long timeout, TimeUnit unit){
+        // todo
+        return false;
+    }
+
+    public void setCorePoolSize(int corePoolSize) {
+        // todo
     }
 
     /**
@@ -248,7 +282,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         Thread workerThread = Thread.currentThread();
         Runnable task = myWorker.firstTask;
 
-        // todo state设置为0，开启中断
+        // todo state设置为0，开启中断（和v1有很大差异）
         // myWorker.unlock();
 
         // 默认线程是由于中断退出的
@@ -551,8 +585,32 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         // todo
     }
 
+    /**
+     * 用于shutdown/shutdownNow时的安全访问权限
+     * 检查当前调用者是否有权限去通过interrupt方法去中断对应工作线程
+     * */
     private void checkShutdownAccess() {
-        // todo
+        // 判断jvm启动时是否设置了安全管理器SecurityManager
+        SecurityManager security = System.getSecurityManager();
+        // 如果没有设置，直接返回无事发生
+
+        if (security != null) {
+            // 设置了权限管理器，验证当前调用者是否有modifyThread的权限
+            // 如果没有，checkPermission会抛出SecurityException异常
+            security.checkPermission(shutdownPerm);
+
+            // 通过上述校验，检查工作线程是否能够被调用者访问
+            final ReentrantLock mainLock = this.mainLock;
+            mainLock.lock();
+            try {
+                for (MyWorker w : workers) {
+                    // 检查每一个工作线程中的thread对象是否有权限被调用者访问
+                    security.checkAccess(w.thread);
+                }
+            } finally {
+                mainLock.unlock();
+            }
+        }
     }
 
     private void advanceRunState(int targetState) {
@@ -641,13 +699,25 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 
     // =============================== worker线程内部类 =====================================
-    private final class MyWorker implements Runnable{
+    /**
+     * jdk的实现中令Worker继承AbstractQueuedSynchronizer并实现了一个不可重入的锁
+     * 1 AQS中的state属性含义
+     * -1：标识工作线程还未启动
+     *  0：标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
+     *  1：标识worker线程正在执行任务（runWorker中，成功获得任务后，通过lock方法将state设置为1）
+     * 2
+     * */
+    private final class MyWorker extends AbstractQueuedSynchronizer implements Runnable{
 
         final Thread thread;
         Runnable firstTask;
         volatile long completedTasks;
 
         public MyWorker(Runnable firstTask) {
+            // Worker初始化时，state设置为-1，用于interruptIfStarted方法中作为过滤条件，避免还未开始启动的Worker响应中断
+            // 在runWorker方法中会通过一次unlock将state修改为0
+            setState(-1);
+
             this.firstTask = firstTask;
 
             // newThread可能是null
@@ -657,6 +727,54 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         @Override
         public void run() {
             runWorker(this);
+        }
+
+        protected boolean isHeldExclusively() {
+            return getState() != 0;
+        }
+
+        protected boolean tryAcquire(int unused) {
+            if (compareAndSetState(0, 1)) {
+                setExclusiveOwnerThread(Thread.currentThread());
+                return true;
+            }
+            return false;
+        }
+
+        protected boolean tryRelease(int unused) {
+            setExclusiveOwnerThread(null);
+            setState(0);
+            return true;
+        }
+
+        public void lock(){
+            acquire(1);
+        }
+
+        public boolean tryLock(){
+            return tryAcquire(1);
+        }
+
+        public void unlock(){
+            release(1);
+        }
+
+        public boolean isLocked(){
+            return isHeldExclusively();
+        }
+
+        void interruptIfStarted() {
+            Thread t;
+            // 三个条件同时满足，才去中断Worker对应的thread
+            // getState() >= 0,用于过滤还未执行runWorker的，刚入队初始化的Worker
+            // thread != null，用于过滤掉构造方法中ThreadFactory.newThread返回null的Worker
+            // !t.isInterrupted()，用于过滤掉那些已经被其它方式中断的Worker线程(比如用户自己去触发中断，提前终止线程池中的任务)
+            if (getState() >= 0 && (t = thread) != null && !t.isInterrupted()) {
+                try {
+                    t.interrupt();
+                } catch (SecurityException ignore) {
+                }
+            }
         }
     }
 
@@ -682,7 +800,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     public static class MyCallerRunsPolicy implements MyRejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
-            // v1版本暂不支持shutdown功能
+            // todo v1版本暂不支持shutdown功能
 //        if (!executor.isShutdown()) {
 //            command.run();
 //        }
@@ -700,7 +818,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         @Override
         public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
             // 什么也不做的，直接返回
-            // 效果就是command任务被无声无息的丢弃了，没有异常也没有
+            // 效果就是command任务被无声无息的丢弃了，没有异常
         }
     }
 
@@ -711,7 +829,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     public static class MyDiscardOldestPolicy implements MyRejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
-            // v1版本暂不支持shutdown功能
+            // todo v1版本暂不支持shutdown功能
 //            if (!executorisShutdown()) {
 //                executor.getQueue().poll();
 //                executor.execute(command);

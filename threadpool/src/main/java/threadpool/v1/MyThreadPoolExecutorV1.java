@@ -187,6 +187,10 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
     }
 
+    public void setCorePoolSize(int corePoolSize) {
+        // todo
+    }
+
     @Override
     public BlockingQueue<Runnable> getQueue() {
         return this.workQueue;
@@ -566,7 +570,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         @Override
         public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
             // 什么也不做的，直接返回
-            // 效果就是command任务被无声无息的丢弃了，没有异常也没有
+            // 效果就是command任务被无声无息的丢弃了，没有异常
         }
     }
 
