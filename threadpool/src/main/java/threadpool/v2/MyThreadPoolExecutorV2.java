@@ -206,6 +206,54 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         }
     }
 
+    /**
+     * 动态更新核心线程最大值corePoolSize
+     * */
+    public void setCorePoolSize(int corePoolSize) {
+        if (corePoolSize < 0) {
+            throw new IllegalArgumentException();
+        }
+
+        // 计算差异
+        int delta = corePoolSize - this.corePoolSize;
+        // 赋值
+        this.corePoolSize = corePoolSize;
+        if (this.workerCount.get() > corePoolSize) {
+            // 更新完毕后，发现当前工作线程数超过了指定的值
+            // 唤醒所有idle线程，让目前空闲的idle超时的线程及时销毁
+            interruptIdleWorkers();
+        } else if (delta > 0) {
+            // 差异大于0，代表着新值大于旧值
+
+            // We don't really know how many new threads are "needed".
+            // As a heuristic, prestart enough new workers (up to new
+            // core size) to handle the current number of tasks in
+            // queue, but stop if queue becomes empty while doing so.
+            // 我们无法确切的知道有多少新的线程是所需要的。
+            // 以启发式的，预先启动足够的新工作线程，用于处理工作队列中的任务
+            // 但当执行此操作时工作队列为空了，则立即停止此操作
+
+            // 取差异和当前工作队列中的最小值为k
+            int k = Math.min(delta, workQueue.size());
+
+            // 尝试着一直增加新的工作线程，直到和k相同
+            // 这样设计的目的在于控制增加的核心线程数量，不要一下子创建过多核心线程
+            // 举个例子：原来的corePoolSize是10，且工作线程数也是10，现在新值设置为了30，新值比旧值大20，理论上应该直接创建20个核心工作线程
+            // 而工作队列中的任务数只有10，那么这个时候直接创建20个新工作线程是没必要的，只需要一个一个创建，在创建的过程中新的线程会尽量的消费工作队列中的任务
+            // 这样就可以以一种启发性的方式创建合适的新工作线程，一定程度上节约资源。后面再有新的任务提交时，再从runWorker方法中去单独创建核心线程(类似惰性创建)
+            while (k-- > 0 && addWorker(null, true)) {
+                if (workQueue.isEmpty()) {
+                    // 其它工作线程在循环的过程中也在消费工作线程，且用户也可能不断地提交任务
+                    // 这是一个动态的过程，但一旦发现当前工作队列为空则立即结束
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 动态更新最大线程数maximumPoolSize
+     * */
     public void setMaximumPoolSize(int maximumPoolSize) {
         if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
             throw new IllegalArgumentException();
@@ -307,10 +355,6 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         }
     }
 
-    public void setCorePoolSize(int corePoolSize) {
-        // todo
-    }
-
     /**
      * 启动worker工作线程
      * */
@@ -319,14 +363,40 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         Thread workerThread = Thread.currentThread();
         Runnable task = myWorker.firstTask;
 
-        // todo state设置为0，开启中断（和v1有很大差异）
-        // myWorker.unlock();
+        // 将state由初始化时的-1设置为0
+        // 标识着此时当前工作线程开始工作了，这样可以被interruptIfStarted选中
+        myWorker.unlock();
 
         // 默认线程是由于中断退出的
         boolean completedAbruptly = true;
         try {
             // worker线程处理主循环，核心逻辑
             while (task != null || (task = getTask()) != null) {
+                // 将state由0标识为1，代表着其由idle状态变成了正在工作的状态
+                // 这样interruptIdleWorkers中的tryLock会失败，这样工作状态的线程就不会被该方法中断任务的正常执行
+                myWorker.lock();
+
+                // If pool is stopping, ensure thread is interrupted;
+                // if not, ensure thread is not interrupted.  This
+                // requires a recheck in second case to deal with
+                // shutdownNow race while clearing interrupt
+                // 1.如果线程池在关闭状态，确保当前线程是处于已中断状态的
+                // 2.如果线程池不在关闭状态，确保当前线程是未中断的
+                // 第二种情况下，需要一个再次检查去处理shutdownNow方法中清除interrupt逻辑
+
+                // 情况1：poolStatus >= STOP && !workerThread.isInterrupted()
+                // 即线程池状态已经至少是STOP了，且当前工作线程是未中断的状态，此时workerThread.interrupt()
+                // 保证上面的第一点: 如果线程池在关闭状态，确保当前线程是处于已中断状态的
+                // 情况2：检查的一瞬间poolStatus < STOP，那么大概率是RUNNING状态，那么通过Thread.interrupted()清空当前线程的中断状态
+                // 保证上面的第二点：如果线程池不在关闭状态，确保当前线程是未中断的
+                // 但是有一个特殊情况，即Thread.interrupted()清除中断标识的临界点，另一个线程可能恰好并发的调用了shutdownNow方法，将状态设置为了STOP
+                // 这里有两个分支情况
+                // 情况2.1：先判断了 todo
+                if ((this.poolStatus.get() >= STOP || (Thread.interrupted() && this.poolStatus.get() >= STOP))
+                        && !workerThread.isInterrupted()) {
+                    workerThread.interrupt();
+                }
+
                 try {
                     // 任务执行前的钩子函数
                     beforeExecute(workerThread, task);
@@ -353,6 +423,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
                     task = null;
                     // 无论执行时是否存在异常，已完成的任务数加1
                     myWorker.completedTasks++;
+                    // 无论如何
+                    myWorker.unlock();
                 }
 
             }
