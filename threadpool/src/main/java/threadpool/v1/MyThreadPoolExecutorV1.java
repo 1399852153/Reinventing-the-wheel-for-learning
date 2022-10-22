@@ -207,6 +207,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         }
     }
 
+    // todo 实现submit
+
     @Override
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
