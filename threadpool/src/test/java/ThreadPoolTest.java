@@ -5,17 +5,51 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class ThreadPoolTest {
 
     public static void main(String[] args) throws InterruptedException {
-        Thread t1 = getThread();
-        System.out.println(t1);
+        test1();
+        test2();
     }
 
-    public static Thread getThread() throws InterruptedException {
-        Thread t = new Thread(()->{
-            System.out.println(666);
+    /**
+     * 先start，再中断
+     * */
+    private static void test1() throws InterruptedException {
+        Thread t = new Thread(() -> {
+            while(true) {
+                try {
+                    System.out.println("test1 before sleep");
+                    Thread.sleep(2000L);
+                    System.out.println("test1 after sleep");
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         });
-        t.start();
 
+        System.out.println("test1 before t.interrupt()");
+        t.start();
         Thread.sleep(1000L);
-        return t;
+        t.interrupt();
+        System.out.println("test1 after t.interrupt()");
+    }
+
+    /**
+     * 先中断，再sleep
+     * */
+    private static void test2() throws InterruptedException {
+        Thread t = new Thread(() -> {
+            while(true) {
+                try {
+                    System.out.println("test2 before sleep");
+                    Thread.sleep(100L);
+                    System.out.println("test2 after sleep");
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+
+        t.start();
+        t.interrupt();
+        System.out.println("test2 after t.interrupt()");
     }
 }

@@ -382,18 +382,22 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
                 // shutdownNow race while clearing interrupt
                 // 1.如果线程池在关闭状态，确保当前线程是处于已中断状态的
                 // 2.如果线程池不在关闭状态，确保当前线程是未中断的
-                // 第二种情况下，需要一个再次检查去处理shutdownNow方法中清除interrupt逻辑
+                // 第二种情况，需要再次检查线程池状态来处理清楚中断标识时，与shutdownNow方法并发竞争的竞争场景
 
                 // 情况1：poolStatus >= STOP && !workerThread.isInterrupted()
                 // 即线程池状态已经至少是STOP了，且当前工作线程是未中断的状态，此时workerThread.interrupt()
-                // 保证上面的第一点: 如果线程池在关闭状态，确保当前线程是处于已中断状态的
+                // 保证上面的第一点: 如果线程池在关闭状态，确保当前线程在执行任务前是处于已中断状态的
                 // 情况2：检查的一瞬间poolStatus < STOP，那么大概率是RUNNING状态，那么通过Thread.interrupted()清空当前线程的中断状态
-                // 保证上面的第二点：如果线程池不在关闭状态，确保当前线程是未中断的
+                // 保证上面的第二点：如果线程池不在关闭状态，确保当前线程在执行任务前是未中断的（）
                 // 但是有一个特殊情况，即Thread.interrupted()清除中断标识的临界点，另一个线程可能恰好并发的调用了shutdownNow方法，将状态设置为了STOP
-                // 这里有两个分支情况
-                // 情况2.1：先判断了 todo
+                // 情况2又有两个子分支情况
+                // 情况2.1：Thread.interrupted()判断返回false，说明当前线程之前没有被中断，当前线程无需中断，interrupted方法返回false，不走if逻辑
+                // 情况2.2：Thread.interrupted()判断返回true，说明当前线程之前已被中断，则有可能是恰好刚才由shutdownNow触发的（当然也有可能是别的原因）
+                // 需要再检查一下线程池状态，如果大于等于STOP说明线程池要停止了，走if逻辑中断工作线程。
+                // 如果线程池状态不是大于等于STOP，则Thread.interrupted()会把中断状态给clear清除掉
                 if ((this.poolStatus.get() >= STOP || (Thread.interrupted() && this.poolStatus.get() >= STOP))
                         && !workerThread.isInterrupted()) {
+                    // 触发线程中断，让task.run方法内的线程及时的感知到，从而退出，进而销毁线程
                     workerThread.interrupt();
                 }
 
@@ -554,7 +558,36 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
             mainLock.unlock();
         }
 
-        // todo 注意：jdk的实现中，在任意工作线程退出时都会检查是否满足线程池终止的条件，但v1版本在此省略了大量关于优雅停止的逻辑
+        // 任何一个线程退出时，都尝试一下当前是否满足线程池中止的条件
+        tryTerminate();
+
+        int poolStatus = this.poolStatus.get();
+        int workerCount = this.workerCount.get();
+        // 判断当前线程池是否未处于STOP状态(RUNNING状态：正常运行或者是SHUTDOWN：调用shutdown方法，等待工作队列中的任务被执行完)
+        if (poolStatus < STOP) {
+            // 线程池还未推进到STOP状态
+            if (!completedAbruptly) {
+                // completedAbruptly=false，说明不是因为中断异常而退出的
+                // min标识当前线程池允许的最小线程数量
+                // 1 如果allowCoreThreadTimeOut为true，则核心线程也可以被销毁，min=0
+                // 2 如果allowCoreThreadTimeOut为false，则min应该为所允许的核心线程个数，min=corePoolSize
+                int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
+                if (min == 0 && ! workQueue.isEmpty()) {
+                    // 如果min为0了，但工作队列不为空，则修正min=1，因为至少需要一个工作线程来将工作队列中的任务消费、处理掉
+                    min = 1;
+                }
+                if (workerCount >= min) {
+                    // 如果当前工作线程数大于了min，当前线程数量是足够的，直接返回（否则要执行下面的addWorker恢复）
+                    return;
+                }
+            }
+            // 两种场景会走到这里进行addWorker操作
+            // 1 completedAbruptly=true,说明线程是因为中断异常而退出的，需要重新创建一个新的工作线程
+            // 2 completedAbruptly=false,且上面的workerCount<min，则说明当前工作线程数不够，需要创建一个
+            // 为什么参数core传的是false呢？
+            // 因为completedAbruptly=true而中断退出的线程，无论当前工作线程数是否大于核心线程，都需要创建一个新的线程来代替原有的被退出的线程
+            addWorker(null, false);
+        }
     }
 
     /**
