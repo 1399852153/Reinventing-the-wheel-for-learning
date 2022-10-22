@@ -80,9 +80,64 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
     private static final MyRejectedExecutionHandler defaultHandler = new MyAbortPolicy();
 
     /**
-     * 当前线程池中存在的worker线程数量
+     * 当前线程池中存在的worker线程数量 + 状态的一个聚合（通过一个原子int进行cas，来避免对两个业务属性字段加锁来保证一致性）
+     * v1版本只关心
      */
-    private final AtomicInteger workerCount = new AtomicInteger();
+    private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
+    private static final int COUNT_BITS = Integer.SIZE - 3;
+    private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
+
+    // runState is stored in the high-order bits
+    private static final int RUNNING    = -1 << COUNT_BITS;
+    private static final int SHUTDOWN   =  0 << COUNT_BITS;
+    private static final int STOP       =  1 << COUNT_BITS;
+    private static final int TIDYING    =  2 << COUNT_BITS;
+    private static final int TERMINATED =  3 << COUNT_BITS;
+
+    // Packing and unpacking ctl
+    private static int runStateOf(int c)     { return c & ~CAPACITY; }
+    private static int workerCountOf(int c)  { return c & CAPACITY; }
+    private static int ctlOf(int rs, int wc) { return rs | wc; }
+
+    /*
+     * Bit field accessors that don't require unpacking ctl.
+     * These depend on the bit layout and on workerCount being never negative.
+     */
+
+    private static boolean runStateLessThan(int c, int s) {
+        return c < s;
+    }
+
+    private static boolean runStateAtLeast(int c, int s) {
+        return c >= s;
+    }
+
+    private static boolean isRunning(int c) {
+        return c < SHUTDOWN;
+    }
+
+    /**
+     * Attempts to CAS-increment the workerCount field of ctl.
+     */
+    private boolean compareAndIncrementWorkerCount(int expect) {
+        return ctl.compareAndSet(expect, expect + 1);
+    }
+
+    /**
+     * Attempts to CAS-decrement the workerCount field of ctl.
+     */
+    private boolean compareAndDecrementWorkerCount(int expect) {
+        return ctl.compareAndSet(expect, expect - 1);
+    }
+
+    /**
+     * Decrements the workerCount field of ctl. This is called only on
+     * abrupt termination of a thread (see processWorkerExit). Other
+     * decrements are performed within getTask.
+     */
+    private void decrementWorkerCount() {
+        do {} while (! compareAndDecrementWorkerCount(ctl.get()));
+    }
 
     public MyThreadPoolExecutorV1(int corePoolSize,
                                   int maximumPoolSize,
@@ -115,7 +170,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             throw new NullPointerException("command参数不能为空");
         }
 
-        if (workerCount.get() < corePoolSize) {
+        int currentCtl = this.ctl.get();
+        if (workerCountOf(currentCtl) < corePoolSize) {
             // 如果当前存在的worker线程数量低于指定的核心线程数量，则创建新的核心线程
             boolean addCoreWorkerSuccess = addWorker(command,true);
             if(addCoreWorkerSuccess){
@@ -129,7 +185,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         boolean enqueueSuccess = this.workQueue.offer(command);
         if(enqueueSuccess){
             // 成功加入阻塞队列
-            if(this.workerCount.get() == 0){
+            if(workerCountOf(currentCtl) == 0){
                 // 在corePoolSize为0的情况下，不会存在核心线程。
                 // 一个任务在入队之后，如果当前线程池中一个线程都没有，则需要创建一个非核心线程来处理入队的任务
                 // 因此firstTask为null，目的是先让任务先入队后创建线程去拉取任务并执行
@@ -181,7 +237,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             throw new IllegalArgumentException();
         }
         this.maximumPoolSize = maximumPoolSize;
-        if (this.workerCount.get() > maximumPoolSize) {
+        int currentCtl = this.ctl.get();
+        if (workerCountOf(currentCtl) > maximumPoolSize) {
             // todo
 //            interruptIdleWorkers();
         }
@@ -275,8 +332,9 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
                 return null;
             }
 
+            int currentCtl = this.ctl.get();
             // 获得当前工作线程个数
-            int workCount = this.workerCount.get();
+            int workCount = workerCountOf(currentCtl);
 
             // 有两种情况需要指定超时时间的方式从阻塞队列workQueue中获取任务（即timed为true）
             // 1.线程池配置参数allowCoreThreadTimeOut为true，即允许核心线程在idle一定时间后被销毁
@@ -377,8 +435,9 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
      * */
     private boolean addWorker(Runnable firstTask, boolean core) {
         while(true) {
+            int currentCtl = this.ctl.get();
             // 判断当前worker数量是否超过了限制
-            int workerCount = this.workerCount.get();
+            int workerCount = workerCountOf(currentCtl);
             if (core) {
                 // 创建的是核心线程，判断当前线程数是否已经超过了指定的核心线程数
                 if (workerCount > this.corePoolSize) {
@@ -459,19 +518,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
      * */
     private void reject(Runnable command) {
         this.handler.rejectedExecution(command, this);
-    }
-
-    private boolean compareAndIncrementWorkerCount(int expect) {
-        return this.workerCount.compareAndSet(expect, expect + 1);
-    }
-    private boolean compareAndDecrementWorkerCount(int expect) {
-        return this.workerCount.compareAndSet(expect, expect - 1);
-    }
-
-    private void decrementWorkerCount() {
-        do {
-            // cas更新，减少workerCount
-        } while (!compareAndDecrementWorkerCount(this.workerCount.get()));
     }
 
     /**
