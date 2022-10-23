@@ -768,6 +768,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         interruptIdleWorkers(false);
     }
 
+    private static final boolean ONLY_ONE = true;
+
     /**
      * 中断处于idle状态的线程
      * @param onlyOne 如果为ture，至多只中断一个工作线程(可能一个都不中断)
@@ -887,35 +889,60 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         return taskList;
     }
 
+    /**
+     * 尝试判断是否满足线程池中止条件，如果满足条件，将其推进到最后的TERMINATED状态
+     * */
     final void tryTerminate() {
-//        for (;;) {
-//            int c = ctl.get();
-//            if (isRunning(c) ||
-//                    runStateAtLeast(c, TIDYING) ||
-//                    (runStateOf(c) == SHUTDOWN && ! workQueue.isEmpty()))
-//                return;
-//            if (workerCountOf(c) != 0) { // Eligible to terminate
-//                interruptIdleWorkers(ONLY_ONE);
-//                return;
-//            }
-//
-//            final ReentrantLock mainLock = this.mainLock;
-//            mainLock.lock();
-//            try {
-//                if (ctl.compareAndSet(c, ctlOf(TIDYING, 0))) {
-//                    try {
-//                        terminated();
-//                    } finally {
-//                        ctl.set(ctlOf(TERMINATED, 0));
-//                        termination.signalAll();
-//                    }
-//                    return;
-//                }
-//            } finally {
-//                mainLock.unlock();
-//            }
-//            // else retry on failed CAS
-//        }
+        for (;;) {
+            int currentCtl = this.ctl.get();
+            if (isRunning(currentCtl) || currentCtl >= TIDYING || (runStateOf(currentCtl) == SHUTDOWN && !workQueue.isEmpty())) {
+                // 1 isRunning(currentCtl)为true，说明线程池还在运行中，不满足中止条件
+                // 2 当前线程池状态已经大于等于TIDYING了，说明之前别的线程可能已经执行过tryTerminate，且通过了这个if校验，不用重复执行了
+                // 3 当前线程池是SHUTDOWN状态，但工作队列中还有任务没处理完，也不满足中止条件
+                // 以上三个条件任意一个满足即直接提前return返回
+                return;
+            }
+
+            // 有两种场景会走到这里
+            // 1 执行了shutdown方法(runState状态为SHUTDOWN)，且当前工作线程已经空了
+            // 2 执行了shutdownNow方法(runState状态为STOP)
+            // 这个时候需要令所有的工作线程都主动的退出来回收资源
+            if (workerCountOf(currentCtl) != 0) {
+                // 如果当前工作线程个数不为0，说明还有别的工作线程在工作中。
+                // 通过interruptIdleWorkers(true)，打断其中的一个idle线程，尝试令其也执行runWorker中的processWorkerExit逻辑，并执行tryTerminate
+                // 被中断的那个工作线程也会执行同样的逻辑（getTask方法返回->processWorkerExit->tryTerminate）
+                // 这样可以一个接着一个的不断打断每一个工作线程，令其逐步的退出（比起一次性的通知所有的idle工作线程，这样相对平滑很多）
+                interruptIdleWorkers(ONLY_ONE);
+                return;
+            }
+
+            // 线程池状态runState为SHUTDOWN或者STOP，且存活的工作线程个数已经为0了
+            // 虽然前面的interruptIdleWorkers是一个一个中断idle线程的，但实际上有的工作线程是因为别的原因退出的（恰好workerCountOf为0了）
+            // 所以这里是可能存在并发的，因此通过mainLock加锁防止并发，避免重复的terminated方法调用和termination.signalAll方法调用
+            final ReentrantLock mainLock = this.mainLock;
+            mainLock.lock();
+            try {
+                // cas的设置ctl的值为TIDYING+工作线程个数0（防止与别的地方ctl并发更新）
+                if (ctl.compareAndSet(currentCtl, ctlOf(TIDYING, 0))) {
+                    try {
+                        // cas成功，调用terminated钩子函数
+                        terminated();
+                    } finally {
+                        // 无论terminated钩子函数是否出现异常
+                        // cas的设置ctl的值为TERMINATED最终态+工作线程个数0（防止与别的地方ctl并发更新）
+                        ctl.set(ctlOf(TERMINATED, 0));
+                        // 通知使用awaitTermination方法等待线程池关闭的其它线程（通过termination.await等待）
+                        termination.signalAll();
+                    }
+                    return;
+                }
+            } finally {
+                mainLock.unlock();
+            }
+
+            // 如果上述对ctl变量的cas操作失败了，则进行重试，再来一次循环
+            // else retry on failed CAS
+        }
     }
 
     // ===================== 留给子类做拓展的方法 =======================
@@ -939,6 +966,11 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      * */
     void onShutdown() {
     }
+
+    /**
+     * 线程池实际终止时的钩子函数
+     * */
+    protected void terminated() { }
 
     // =============================== worker线程内部类 =====================================
     /**
