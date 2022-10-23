@@ -891,6 +891,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
     /**
      * 尝试判断是否满足线程池中止条件，如果满足条件，将其推进到最后的TERMINATED状态
+     * 注意：必须在任何可能触发线程池中止的场景下调用（例如工作线程退出，或者SHUTDOWN状态下队列工作队列为空等）
      * */
     final void tryTerminate() {
         for (;;) {
