@@ -96,6 +96,11 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      */
     private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
     private static final int COUNT_BITS = Integer.SIZE - 3;
+
+    /**
+     * 32位的有符号整数，有3位是用来存放线程池状态的，所以用来维护当前工作线程个数的部分就只能用29位了
+     * 被占去的3位中，有1位原来的符号位，2位是原来的数值位。所以的值为Integer.MAX的4分之一((Integer.MAX_VALUE / 4) == CAPACITY)
+     * */
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 
     /**
@@ -181,19 +186,38 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
             // 如果当前存在的worker线程数量低于指定的核心线程数量，则创建新的核心线程
             boolean addCoreWorkerSuccess = addWorker(command,true);
             if(addCoreWorkerSuccess){
-                // 添加成功，直接返回即可
+                // addWorker添加成功，直接返回即可
                 return;
             }
-            // 因为cas并发时争抢失败等原因导致添加核心线程不成功，则继续往下执行
+
+            // addWorker失败了
+            // 失败的原因主要有以下几个：
+            // 1 线程池的状态出现了变化，比如调用了shutdown/shutdownNow方法，不再是RUNNING状态，停止接受新的任务
+            // 2 多个线程并发的execute提交任务，导致cas失败，重试后发现当前线程的个数已经超过了限制
+            // 3 小概率是ThreadFactory线程工厂没有正确的返回一个Thread
+
+            // 获取最新的ctl状态
+            currentCtl = this.ctl.get();
         }
 
-        // v1版本暂时不考虑shutdown时的处理，不判断状态
-        boolean enqueueSuccess = this.workQueue.offer(command);
-        if(enqueueSuccess){
-            // 成功加入阻塞队列
-            if(workerCountOf(currentCtl) == 0){
-                // 在corePoolSize为0的情况下，不会存在核心线程。
-                // 一个任务在入队之后，如果当前线程池中一个线程都没有，则需要创建一个非核心线程来处理入队的任务
+        // 走到这里有两种情况
+        // 1 因为核心线程超过限制（workerCountOf(currentCtl) < corePoolSize == false），需要尝试尝试将任务放入阻塞队列
+        // 2 addWorker返回false，创建核心工作线程失败
+
+        // 判断当前线程池状态是否为running
+        // 如果是running状态，则进一步执行任务入队操作
+        if(isRunning(currentCtl) && this.workQueue.offer(command)){
+            // 线程池是running状态，且workQueue.offer入队成功
+
+            int recheck = this.ctl.get();
+            // 重新检查状态，避免在上面入队的过程中线程池并发的关闭了
+            // 如果是isRunning=false，则进一步需要通过remove操作将刚才入队的任务删除，进行回滚
+            if (!isRunning(recheck) && remove(command)) {
+                // 线程池关闭了，执行reject操作
+                reject(command);
+            } else if(workerCountOf(currentCtl) == 0){
+                // 在corePoolSize为0的情况下，当前不存在存活的核心线程
+                // 一个任务在入队之后，如果当前线程池中一个线程都没有，则需要兜底的创建一个非核心线程来处理入队的任务
                 // 因此firstTask为null，目的是先让任务先入队后创建线程去拉取任务并执行
                 addWorker(null,false);
             }else{
@@ -204,7 +228,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
             // 阻塞队列已满，尝试创建一个新的非核心线程处理
             boolean addNonCoreWorkerSuccess = addWorker(command,false);
             if(!addNonCoreWorkerSuccess){
-                // 创建非核心线程失败，执行拒绝策略
+                // 创建非核心线程失败，执行拒绝策略（失败的原因和前面创建核心线程addWorker的原因类似）
                 reject(command);
             }else{
                 // 创建非核心线程成功，成功返回
@@ -639,54 +663,73 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      * 向线程池中加入worker
      * */
     private boolean addWorker(Runnable firstTask, boolean core) {
-        while(true) {
+        // retry标识外层循环
+        retry:
+        for (;;) {
             int currentCtl = ctl.get();
             int runState = runStateOf(currentCtl);
 
             // Check if queue empty only if necessary.
-            // todo 待解释
+            // 线程池终止时需要返回false,避免新的worker被创建
+            // 1 先判断runState >= SHUTDOWN
+            // 2 runState >= SHUTDOWN时，意味着不再允许创建新的工作线程，但有一种情况例外
+            // 即SHUTDOWN状态下(runState == SHUTDOWN)，工作队列不为空(!workQueue.isEmpty())，还需要继续执行
+            // 比如在当前存活的线程发生中断异常时，会调用processWorkerExit方法，在销毁原有工作线程后调用addWorker重新生产一个新的（firstTask == null）
             if (runState >= SHUTDOWN && !(runState == SHUTDOWN && firstTask == null && !workQueue.isEmpty())) {
+                // 线程池已经是关闭状态了，不再允许创建新的工作线程，返回false
                 return false;
             }
 
-
-            // todo 和jdk的有差异，待完善
-            // 判断当前worker数量是否超过了限制
-            int workerCount = workerCountOf(currentCtl);
-            if (core) {
-                // 创建的是核心线程，判断当前线程数是否已经超过了指定的核心线程数
-                if (workerCount > this.corePoolSize) {
-                    // 超过了核心线程数，创建核心worker线程失败
+            // 用于cas更新workerCount的内层循环（注意这里面与jdk的写法不同，改写成了逻辑一致但更可读的形式）
+            for (;;) {
+                // 判断当前worker数量是否超过了限制
+                int workerCount = workerCountOf(currentCtl);
+                if (workerCount > CAPACITY) {
+                    // 当前worker数量超过了设计上允许的最大限制
                     return false;
                 }
-            } else {
-                // 创建的是非核心线程，判断当前线程数是否已经超过了指定的最大线程数
-                if (workerCount > this.maximumPoolSize) {
-                    // 超过了最大线程数，创建非核心worker线程失败
-                    return false;
+                if (core) {
+                    // 创建的是核心线程，判断当前线程数是否已经超过了指定的核心线程数
+                    if (workerCount > this.corePoolSize) {
+                        // 超过了核心线程数，创建核心worker线程失败
+                        return false;
+                    }
+                } else {
+                    // 创建的是非核心线程，判断当前线程数是否已经超过了指定的最大线程数
+                    if (workerCount > this.maximumPoolSize) {
+                        // 超过了最大线程数，创建非核心worker线程失败
+                        return false;
+                    }
                 }
-            }
 
-            // cas更新workerCount的值
-            boolean casSuccess = compareAndIncrementWorkerCount(workerCount);
-            if(casSuccess){
-                // cas成功，跳出循环
-                break;
-            }
+                // cas更新workerCount的值
+                boolean casSuccess = compareAndIncrementWorkerCount(workerCount);
+                if (casSuccess) {
+                    // cas成功，跳出外层循环
+                    break retry;
+                }
 
-            // cas争抢失败，重新循环
+                // 重新检查一下当前线程池的状态与之前是否一致
+                currentCtl = ctl.get();  // Re-read ctl
+                if (runStateOf(currentCtl) != runState) {
+                    // 从外层循环开始continue（因为说明在这期间 线程池的工作状态出现了变化，需要重新判断）
+                    continue retry;
+                }
+
+                // compareAndIncrementWorkerCount方法cas争抢失败，重新执行内层循环
+            }
         }
 
         boolean workerStarted = false;
-        boolean workerAdded;
+        boolean workerAdded = false;
 
         MyWorker newWorker = null;
         try {
             // 创建一个新的worker
             newWorker = new MyWorker(firstTask);
             final Thread myWorkerThread = newWorker.thread;
-            // 线程创建成功
             if (myWorkerThread != null) {
+                // MyWorker初始化时内部线程创建成功
                 final ReentrantLock mainLock = this.mainLock;
 
                 // 加锁，防止并发更新
