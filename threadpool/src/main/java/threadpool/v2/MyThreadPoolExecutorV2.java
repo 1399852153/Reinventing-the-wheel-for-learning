@@ -65,7 +65,6 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     private final Condition termination = mainLock.newCondition();
 
     /**
-     * Tracks largest attained pool size. Accessed only under mainLock.
      * 跟踪线程池曾经有过的最大线程数量（只能在mainLock的并发保护下更新）
      */
     private int largestPoolSize;
@@ -730,38 +729,53 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
             final Thread myWorkerThread = newWorker.thread;
             if (myWorkerThread != null) {
                 // MyWorker初始化时内部线程创建成功
-                final ReentrantLock mainLock = this.mainLock;
 
                 // 加锁，防止并发更新
+                final ReentrantLock mainLock = this.mainLock;
                 mainLock.lock();
 
                 try {
-                    // todo 和jdk的有差异，待完善
-                    if (myWorkerThread.isAlive()) {
-                        // precheck that t is startable
-                        // 预检查线程的状态，刚初始化的worker线程必须是未唤醒的状态
-                        throw new IllegalThreadStateException();
-                    }
+                    // Recheck while holding lock.
+                    // Back out on ThreadFactory failure or if
+                    // shut down before lock acquired.
+                    int runState = runStateOf(ctl.get());
 
-                    // 加入worker集合
-                    this.workers.add(newWorker);
-                    // 创建成功
-                    workerAdded = true;
+                    // 重新检查线程池运行状态，满足以下两个条件的任意一个才创建新Worker
+                    // 1 runState < SHUTDOWN
+                    // 说明线程池处于RUNNING状态正常运行，可以创建新的工作线程
+                    // 2 runState == SHUTDOWN && firstTask == null
+                    // 说明线程池调用了shutdown，但工作队列不为空，依然需要新的Worker。
+                    // firstTask == null标识着其不是因为外部提交新任务而创建新Worker，而是在消费SHUTDOWN前已提交的任务
+                    if (runState < SHUTDOWN ||
+                            (runState == SHUTDOWN && firstTask == null)) {
+                        if (myWorkerThread.isAlive()) {
+                            // 预检查线程的状态，刚初始化的worker线程必须是未唤醒的状态
+                            throw new IllegalThreadStateException();
+                        }
 
-                    int workerSize = workers.size();
-                    if (workerSize > largestPoolSize) {
-                        // 如果当前worker个数超过了之前记录的最大存活线程数，将其更新
-                        largestPoolSize = workerSize;
+                        // 加入worker集合
+                        this.workers.add(newWorker);
+
+                        int workerSize = workers.size();
+                        if (workerSize > largestPoolSize) {
+                            // 如果当前worker个数超过了之前记录的最大存活线程数，将其更新
+                            largestPoolSize = workerSize;
+                        }
+
+                        // 创建成功
+                        workerAdded = true;
                     }
                 } finally {
                     // 无论是否发生异常，都先将主控锁解锁
                     mainLock.unlock();
                 }
 
-                // 加入成功，启动worker线程
-                myWorkerThread.start();
-                // 标识为worker线程启动成功，并作为返回值返回
-                workerStarted = true;
+                if (workerAdded) {
+                    // 加入成功，启动worker线程
+                    myWorkerThread.start();
+                    // 标识为worker线程启动成功，并作为返回值返回
+                    workerStarted = true;
+                }
             }
         }finally {
             if (!workerStarted) {
@@ -1098,7 +1112,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
     // ============================== jdk默认提供的4种拒绝策略 ===============================================
     /**
-     * 抛出拒绝执行异常的拒绝策略
+     * 抛出RejectedExecutionException的拒绝策略
      * 评价：能让提交任务的一方感知到异常的策略，比较通用，也是jdk默认的拒绝策略
      * */
     public static class MyAbortPolicy implements MyRejectedExecutionHandler {
