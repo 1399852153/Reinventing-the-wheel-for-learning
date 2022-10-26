@@ -136,7 +136,6 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     private static final int TIDYING = 2;
     private static final int TERMINATED = 3;
 
-
     // Packing and unpacking ctl
     private static int runStateOf(int c)     { return c & ~CAPACITY; }
     private static int workerCountOf(int c)  { return c & CAPACITY; }
@@ -146,7 +145,6 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      * Bit field accessors that don't require unpacking ctl.
      * These depend on the bit layout and on workerCount being never negative.
      */
-
     private static boolean runStateLessThan(int c, int s) {
         return c < s;
     }
@@ -168,10 +166,9 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
     private void decrementWorkerCount() {
         do {
-            // cas更新，减少workerCount
+            // cas更新，workerCount自减1
         } while (!compareAndDecrementWorkerCount(ctl.get()));
     }
-
 
     public MyThreadPoolExecutorV2(int corePoolSize,
                                   int maximumPoolSize,
@@ -354,6 +351,21 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 
     /**
+     * 获得当前线程池的工作线程个数
+     * */
+    public int getPoolSize() {
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            // 如果已经是TIDYING或者TERMINATED了，返回0
+            // 否则返回工作线程集合workers的size
+            return runStateAtLeast(ctl.get(), TIDYING) ? 0 : workers.size();
+        } finally {
+            mainLock.unlock();
+        }
+    }
+
+    /**
      * 关闭线程池（不再接收新任务，但已提交的任务会全部被执行）
      * 但不会等待任务彻底的执行完成（awaitTermination）
      */
@@ -426,17 +438,38 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         mainLock.lock();
         try {
             for (;;) {
-                if (ctl.get() >= TERMINATED){
+                // 已经是终止状态了，直接返回true
+                if (runStateAtLeast(ctl.get(), TERMINATED)){
                     return true;
                 }
+                // 上面的if条件不满足，说明还未终结，但nanos已经减为0了，说明已经超时了
+                // 返回false，代表直到超时，线程池依然没有终止
                 if (nanos <= 0) {
                     return false;
                 }
+                // 等待在termination条件变量上（线程池终止时会signAll该条件变量）
                 nanos = termination.awaitNanos(nanos);
             }
         } finally {
             mainLock.unlock();
         }
+    }
+
+    /**
+     * 线程池是否是正在终止的过程中
+     * */
+    public boolean isTerminating() {
+        int currentCtl = ctl.get();
+        // 线程池状态不是RUNNING，但又小于TERMINATED
+        return !isRunning(currentCtl) && runStateLessThan(currentCtl, TERMINATED);
+    }
+
+    /**
+     * 线程池是否已终止
+     * */
+    public boolean isTerminated() {
+        // 线程池状态大于等于TERMINATED
+        return runStateAtLeast(ctl.get(), TERMINATED);
     }
 
     /**
@@ -479,7 +512,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
                 // 情况2.2：Thread.interrupted()判断返回true，说明当前线程之前已被中断，则有可能是恰好刚才由shutdownNow触发的（当然也有可能是别的原因）
                 // 需要再检查一下线程池状态，如果大于等于STOP说明线程池要停止了，走if逻辑中断工作线程。
                 // 如果线程池状态不是大于等于STOP，则Thread.interrupted()会把中断状态给clear清除掉
-                if ((runStateOf(this.ctl.get()) >= STOP || (Thread.interrupted() && runStateOf(this.ctl.get()) >= STOP))
+                if ((runStateAtLeast(ctl.get(), STOP) || (Thread.interrupted() && runStateAtLeast(ctl.get(), STOP)))
                         && !workerThread.isInterrupted()) {
                     // 触发线程中断，让task.run方法内的线程及时的感知到，从而退出，进而销毁线程
                     workerThread.interrupt();
@@ -539,7 +572,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     private Runnable getTask() {
         boolean timedOut = false;
 
-        while(true) {
+        for(;;) {
             int currentCtl = ctl.get();
             int runState = runStateOf(currentCtl);
 
@@ -656,7 +689,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
         int currentCtl = this.ctl.get();
         // 判断当前线程池是否未处于STOP状态(RUNNING状态：正常运行或者是SHUTDOWN：调用shutdown方法，等待工作队列中的任务被执行完)
-        if (runStateOf(currentCtl) < STOP) {
+        if (runStateLessThan(currentCtl, STOP)) {
             // 线程池还未推进到STOP状态
             if (!completedAbruptly) {
                 // completedAbruptly=false，说明不是因为中断异常而退出的
@@ -931,7 +964,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 
     private void advanceRunState(int targetState) {
-        while(true) {
+        for(;;){
             // 获得当前的线程池状态
             int currentCtl = this.ctl.get();
 
@@ -940,7 +973,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
             // 2  (this.ctl.compareAndSet)，cas的将runState更新为targetState
             // 如果返回true则说明cas更新成功直接break结束（或语句中第一个条件为false，第二个条件为true）
             // 如果返回false说明cas争抢失败，再次进入while循环重试（或语句中第一个和第二个条件都是false，不break而是继续执行循环重试）
-            if (runStateOf(currentCtl) >= targetState ||
+            if (runStateAtLeast(currentCtl, targetState) ||
                     this.ctl.compareAndSet(
                             currentCtl,
                             ctlOf(targetState, workerCountOf(currentCtl)
@@ -977,7 +1010,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     final void tryTerminate() {
         for (;;) {
             int currentCtl = this.ctl.get();
-            if (isRunning(currentCtl) || currentCtl >= TIDYING || (runStateOf(currentCtl) == SHUTDOWN && !workQueue.isEmpty())) {
+            if (isRunning(currentCtl) || runStateAtLeast(currentCtl, TIDYING) || (runStateOf(currentCtl) == SHUTDOWN && !workQueue.isEmpty())) {
                 // 1 isRunning(currentCtl)为true，说明线程池还在运行中，不满足中止条件
                 // 2 当前线程池状态已经大于等于TIDYING了，说明之前别的线程可能已经执行过tryTerminate，且通过了这个if校验，不用重复执行了
                 // 3 当前线程池是SHUTDOWN状态，但工作队列中还有任务没处理完，也不满足中止条件
