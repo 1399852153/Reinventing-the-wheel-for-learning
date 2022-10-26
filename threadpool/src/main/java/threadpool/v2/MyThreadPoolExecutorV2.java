@@ -438,6 +438,23 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 
     /**
+     * 线程池是否是正在终止的过程中
+     * */
+    public boolean isTerminating() {
+        int currentCtl = ctl.get();
+        // 线程池状态不是RUNNING，但又小于TERMINATED
+        return !isRunning(currentCtl) && runStateLessThan(currentCtl, TERMINATED);
+    }
+
+    /**
+     * 线程池是否已终止
+     * */
+    public boolean isTerminated() {
+        // 线程池状态大于等于TERMINATED
+        return runStateAtLeast(ctl.get(), TERMINATED);
+    }
+
+    /**
      * 调用者会被阻塞，直到线程池变为shutdown状态
      * 通过参数可以控制被阻塞等待的超时时间
      * @throws InterruptedException awaitNanos监听条件变量时，可能会抛出InterruptedException
@@ -469,29 +486,15 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 
     /**
-     * 线程池是否是正在终止的过程中
-     * */
-    public boolean isTerminating() {
-        int currentCtl = ctl.get();
-        // 线程池状态不是RUNNING，但又小于TERMINATED
-        return !isRunning(currentCtl) && runStateLessThan(currentCtl, TERMINATED);
-    }
-
-    /**
-     * 线程池是否已终止
-     * */
-    public boolean isTerminated() {
-        // 线程池状态大于等于TERMINATED
-        return runStateAtLeast(ctl.get(), TERMINATED);
-    }
-
-    /**
      * 启动worker工作线程
      * */
     private void runWorker(MyWorker myWorker) {
         // 时worker线程的run方法调用的，此时的current线程的是worker线程
         Thread workerThread = Thread.currentThread();
+
         Runnable task = myWorker.firstTask;
+        // 已经暂存了firstTask，将其清空（有地方根据firstTask是否存在来判断工作线程中负责的任务是否是新提交的）
+        myWorker.firstTask = null;
 
         // 将state由初始化时的-1设置为0
         // 标识着此时当前工作线程开始工作了，这样可以被interruptIfStarted选中
@@ -1005,12 +1008,14 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         ArrayList<Runnable> taskList = new ArrayList<>();
         queue.drainTo(taskList);
         // 通常情况下，普通的阻塞队列的drainTo方法可以一次性的把所有元素都转移到taskList中
-        // 但jdk的DelayedQueue或者一些自定义的阻塞队列，drainTo方法无法转移所有的元素（比如DelayedQueue的drainTo方法只能转移已经不需要延迟的元素，即getDelay()<=0）
-        // 所以在这里打一个补丁逻辑：如果drainTo方法执行后工作队列依然不为空，则通过更基础的remove方法把队列中剩余元素一个一个的循环放到taskList中
+        // 但jdk的DelayedQueue或者一些自定义的阻塞队列，drainTo方法无法转移所有的元素
+        // （比如DelayedQueue的drainTo方法只能转移已经不需要延迟的元素，即getDelay()<=0）
         if (!queue.isEmpty()) {
+            // 所以在这里打一个补丁逻辑：如果drainTo方法执行后工作队列依然不为空，则通过更基础的remove方法把队列中剩余元素一个一个的循环放到taskList中
             for (Runnable r : queue.toArray(new Runnable[0])) {
-                if (queue.remove(r))
+                if (queue.remove(r)) {
                     taskList.add(r);
+                }
             }
         }
         return taskList;
@@ -1023,7 +1028,9 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     final void tryTerminate() {
         for (;;) {
             int currentCtl = this.ctl.get();
-            if (isRunning(currentCtl) || runStateAtLeast(currentCtl, TIDYING) || (runStateOf(currentCtl) == SHUTDOWN && !workQueue.isEmpty())) {
+            if (isRunning(currentCtl)
+                    || runStateAtLeast(currentCtl, TIDYING)
+                    || (runStateOf(currentCtl) == SHUTDOWN && !workQueue.isEmpty())) {
                 // 1 isRunning(currentCtl)为true，说明线程池还在运行中，不满足中止条件
                 // 2 当前线程池状态已经大于等于TIDYING了，说明之前别的线程可能已经执行过tryTerminate，且通过了这个if校验，不用重复执行了
                 // 3 当前线程池是SHUTDOWN状态，但工作队列中还有任务没处理完，也不满足中止条件
