@@ -257,6 +257,19 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         }
     }
 
+    /**
+     * jdk里面submit方法是放在父类AbstractExecutorService里的
+     * */
+    public Future<?> submit(Runnable task) {
+        if (task == null) {
+            throw new NullPointerException();
+        }
+        // 把Runnable包装成FutureTask（同时实现了两个接口，既是Runnable又是Future）
+        RunnableFuture<Void> ftask = new FutureTask<>((Callable<Void>) task);
+        execute(ftask);
+        return ftask;
+    }
+
     @Override
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
