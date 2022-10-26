@@ -103,8 +103,32 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 
     /**
-     * 线程池状态poolStatus常量（状态只会由小到大，单调递增）
-     * todo 待完善，状态迁移图  说明什么时候会从A状态到B状态
+     * 线程池状态poolStatus常量（状态值只会由小到大，单调递增）
+     * 线程池状态迁移图：
+     *         ↗ SHUTDOWN ↘
+     * RUNNING       ↓       TIDYING → TERMINATED
+     *         ↘   STOP   ↗
+     * 1 RUNNING状态，代表着线程池处于正常运行的状态。能正常的接收并处理提交的任务
+     * 线程池对象初始化时，状态为RUNNING
+     * 对应逻辑：private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
+     *
+     * 2 SHUTDOWN状态，代表线程池处于停止对外服务的状态。不再接收新提交的任务，但依然会将workQueue工作队列中积压的任务处理完
+     * 调用了shutdown方法时，状态由RUNNING -> SHUTDOWN
+     * 对应逻辑：shutdown方法中的advanceRunState(SHUTDOWN);
+     *
+     * 3 STOP状态，代表线程池处于停止状态。不再接受新提交的任务，同时也不再处理workQueue工作队列中积压的任务，当前还在处理任务的工作线程将收到interrupt中断通知
+     * 之前未调用shutdown方法，直接调用了shutdownNow方法，状态由RUNNING -> STOP
+     * 之前先调用了shutdown方法，后调用了shutdownNow方法，状态由SHUTDOWN -> STOP
+     * 对应逻辑：shutdownNow方法中的advanceRunState(STOP);
+     *
+     * 4 TIDYING状态，代表着线程池即将完全终止，正在做最后的收尾工作
+     * 当前线程池状态为SHUTDOWN,任务被消费完工作队列workQueue为空，且工作线程全部退出完成工作线程集合workers为空时，tryTerminate方法中将状态由SHUTDOWN->TIDYING
+     * 当前线程池状态为STOP,工作线程全部退出完成工作线程集合workers为空时，tryTerminate方法中将状态由STOP->TIDYING
+     * 对应逻辑：tryTerminate方法中的ctl.compareAndSet(c, ctlOf(TIDYING, 0)
+     *
+     * 5 TERMINATED状态，代表着线程池完全的关闭。之前线程池已经处于TIDYING状态，且调用的钩子函数terminated已返回
+     * 当前线程池状态为TIDYING，调用的钩子函数terminated已返回
+     * 对应逻辑：tryTerminate方法中的ctl.set(ctlOf(TERMINATED, 0));
      * */
     private static final int RUNNING = -1;
     private static final int SHUTDOWN = 0;
