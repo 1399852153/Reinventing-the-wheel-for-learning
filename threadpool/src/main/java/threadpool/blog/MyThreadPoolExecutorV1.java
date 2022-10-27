@@ -430,7 +430,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
             // 所以即使timed && timedOut超时逻辑匹配，也需要等待任务被处理完，工作队列为空之后才能回收当前线程，否则还会继续拉取剩余任务
             if ((workCount > maximumPoolSize || (timed && timedOut))
                     && (workCount > 1 || workQueue.isEmpty())) {
-                if (compareAndDecrementWorkerCount(workCount)) {
+                if (compareAndDecrementWorkerCount(currentCtl)) {
                     // 满足上述条件，说明当前线程需要被销毁了，返回null
                     return null;
                 }
@@ -544,7 +544,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
                 }
 
                 // cas更新workerCount的值
-                boolean casSuccess = compareAndIncrementWorkerCount(workerCount);
+                boolean casSuccess = compareAndIncrementWorkerCount(currentCtl);
                 if (casSuccess) {
                     // cas成功，跳出外层循环
                     break retry;
