@@ -105,11 +105,11 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
      * 当前线程池状态为TIDYING，调用的钩子函数terminated已返回
      * 对应逻辑：tryTerminate方法中的ctl.set(ctlOf(TERMINATED, 0));
      * */
-    private static final int RUNNING = -1;
-    private static final int SHUTDOWN = 0;
-    private static final int STOP = 1;
-    private static final int TIDYING = 2;
-    private static final int TERMINATED = 3;
+    private static final int RUNNING = -1 << COUNT_BITS;
+    private static final int SHUTDOWN = 0 << COUNT_BITS;
+    private static final int STOP = 1 << COUNT_BITS;
+    private static final int TIDYING = 2 << COUNT_BITS;
+    private static final int TERMINATED = 3 << COUNT_BITS;
 
     // Packing and unpacking ctl
     private static int workerCountOf(int c)  { return c & CAPACITY; }
@@ -180,7 +180,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         // 走到这里有两种情况
         // 1 因为核心线程超过限制（workerCountOf(currentCtl) < corePoolSize == false），需要尝试尝试将任务放入阻塞队列
         // 2 addWorker返回false，创建核心工作线程失败
-
         if(this.workQueue.offer(command)){
             // workQueue.offer入队成功
 
