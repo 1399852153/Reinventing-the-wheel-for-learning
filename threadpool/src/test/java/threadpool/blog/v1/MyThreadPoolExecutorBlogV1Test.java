@@ -10,8 +10,14 @@ import java.util.concurrent.TimeUnit;
 
 public class MyThreadPoolExecutorBlogV1Test {
 
+    /**
+     * 无界阻塞队列
+     * corePoolSize = 5
+     * maximumPoolSize = 10
+     * 最多只会创建5(corePoolSize)个工作线程
+     * */
     @Test
-    public void testNormal() throws InterruptedException {
+    public void testUnBoundedQueue() throws InterruptedException {
         MyThreadPoolExecutorV1 myThreadPoolExecutorV1 = new MyThreadPoolExecutorV1(
                 5, 10, 30, TimeUnit.SECONDS,
                 // 无界队列
