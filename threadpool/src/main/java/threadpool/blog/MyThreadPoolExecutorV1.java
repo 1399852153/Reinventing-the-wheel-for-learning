@@ -396,13 +396,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         for(;;) {
             int currentCtl = ctl.get();
 
-            if (workQueue.isEmpty()){
-                // 当前工作线程需要退出，先将worker计数器减一
-                decrementWorkerCount();
-                // 返回null，令当前worker线程退出
-                return null;
-            }
-
             // 获得当前工作线程个数
             int workCount = workerCountOf(currentCtl);
 

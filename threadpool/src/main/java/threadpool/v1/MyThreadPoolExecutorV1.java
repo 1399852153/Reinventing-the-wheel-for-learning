@@ -326,14 +326,6 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
         boolean timedOut = false;
 
         while(true) {
-            // 工作队列为空
-            if (workQueue.isEmpty()) {
-                // 当前工作线程需要退出，先将worker计数器减一
-                decrementWorkerCount();
-                // 返回null，令当前worker线程退出
-                return null;
-            }
-
             int currentCtl = this.ctl.get();
             // 获得当前工作线程个数
             int workCount = workerCountOf(currentCtl);

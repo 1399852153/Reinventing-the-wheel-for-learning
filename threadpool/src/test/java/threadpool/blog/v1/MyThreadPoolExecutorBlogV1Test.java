@@ -113,4 +113,39 @@ public class MyThreadPoolExecutorBlogV1Test {
         Assert.assertTrue(hasRejectedExecutionException);
         Assert.assertEquals(10, myThreadPoolExecutorV1.getPoolSize());
     }
+
+    /**
+     * 测试允许核心线程超时
+     * 提交5个任务(每个耗时2秒)，会创建5个核心线程
+     * 等待10s后idle的核心线程全部退出（keepAliveTime=5s）
+     * */
+    @Test
+    public void testAllowCoreThreadTimeOut() throws InterruptedException {
+        MyThreadPoolExecutorV1 myThreadPoolExecutorV1 = new MyThreadPoolExecutorV1(
+                5, 10, 5, TimeUnit.SECONDS,
+                // 有界队列
+                new LinkedBlockingQueue<>(10),
+                Executors.defaultThreadFactory(),
+                new MyThreadPoolExecutorV1.MyAbortPolicy());
+        // 允许idle的核心线程销毁
+        myThreadPoolExecutorV1.allowCoreThreadTimeOut(true);
+
+        for (int i = 0; i < 5; i++) {
+            myThreadPoolExecutorV1.execute(() -> {
+                // 不是死循环，休眠后结束
+                System.out.println("666:" + Thread.currentThread().getName());
+                try {
+                    Thread.sleep(2000L);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        // 未超时前是5个
+        Assert.assertEquals(5, myThreadPoolExecutorV1.getPoolSize());
+        Thread.sleep(10000L);
+        // 5s后核心线程就都销毁了
+        Assert.assertEquals(0, myThreadPoolExecutorV1.getPoolSize());
+    }
 }
