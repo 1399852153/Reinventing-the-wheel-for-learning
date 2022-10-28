@@ -145,7 +145,7 @@ public class MyThreadPoolExecutorBlogV1Test {
         // 未超时前是5个
         Assert.assertEquals(5, myThreadPoolExecutorV1.getPoolSize());
         Thread.sleep(10000L);
-        // 5s后核心线程就都销毁了
+        // 10s后核心线程就都销毁了
         Assert.assertEquals(0, myThreadPoolExecutorV1.getPoolSize());
     }
 }
