@@ -19,14 +19,16 @@ public class MyThreadPoolExecutorBlogV1Test {
      * */
     @Test
     public void testUnBoundedQueue() throws InterruptedException {
+        int corePoolSize = 5;
+        int taskNum = 20;
         MyThreadPoolExecutorV1 myThreadPoolExecutorV1 = new MyThreadPoolExecutorV1(
-                5, 10, 60, TimeUnit.SECONDS,
+                corePoolSize, 10, 60, TimeUnit.SECONDS,
                 // 无界队列
                 new LinkedBlockingQueue<>(),
                 Executors.defaultThreadFactory(),
                 new MyThreadPoolExecutorV1.MyAbortPolicy());
 
-        for(int i=0; i<20; i++) {
+        for(int i=0; i<taskNum; i++) {
             myThreadPoolExecutorV1.execute(() -> {
                 while(true){
                     System.out.println("666:" + Thread.currentThread().getName());
@@ -40,7 +42,9 @@ public class MyThreadPoolExecutorBlogV1Test {
         }
 
         Thread.sleep(5000L);
-        Assert.assertEquals(5, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(corePoolSize, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(taskNum-corePoolSize, myThreadPoolExecutorV1.getQueue().size());
+
     }
 
     /**
@@ -51,14 +55,19 @@ public class MyThreadPoolExecutorBlogV1Test {
      * */
     @Test
     public void testBoundedQueueNoReject() throws InterruptedException {
+        int corePoolSize = 5;
+        int maximumPooSize = 10;
+        int taskNum = 20;
+        int queueCapacity = 10;
+
         MyThreadPoolExecutorV1 myThreadPoolExecutorV1 = new MyThreadPoolExecutorV1(
-                5, 10, 60, TimeUnit.SECONDS,
+                corePoolSize, maximumPooSize, 60, TimeUnit.SECONDS,
                 // 有界队列
-                new LinkedBlockingQueue<>(10),
+                new LinkedBlockingQueue<>(queueCapacity),
                 Executors.defaultThreadFactory(),
                 new MyThreadPoolExecutorV1.MyAbortPolicy());
 
-        for(int i=0; i<20; i++) {
+        for(int i=0; i<taskNum; i++) {
             myThreadPoolExecutorV1.execute(() -> {
                 while(true){
                     System.out.println("666:" + Thread.currentThread().getName());
@@ -72,7 +81,9 @@ public class MyThreadPoolExecutorBlogV1Test {
         }
 
         Thread.sleep(5000L);
-        Assert.assertEquals(10, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(maximumPooSize, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(queueCapacity, myThreadPoolExecutorV1.getQueue().size());
+
     }
 
     /**
@@ -83,16 +94,21 @@ public class MyThreadPoolExecutorBlogV1Test {
      * */
     @Test
     public void testBoundedQueueHasReject() throws InterruptedException {
+        int corePoolSize = 5;
+        int maximumPooSize = 10;
+        int taskNum = 21;
+        int queueCapacity = 10;
+
         MyThreadPoolExecutorV1 myThreadPoolExecutorV1 = new MyThreadPoolExecutorV1(
-                5, 10, 60, TimeUnit.SECONDS,
+                corePoolSize, maximumPooSize, 60, TimeUnit.SECONDS,
                 // 有界队列
-                new LinkedBlockingQueue<>(10),
+                new LinkedBlockingQueue<>(queueCapacity),
                 Executors.defaultThreadFactory(),
                 new MyThreadPoolExecutorV1.MyAbortPolicy());
 
         boolean hasRejectedExecutionException = false;
         try {
-            for (int i = 0; i < 21; i++) {
+            for (int i = 0; i < taskNum; i++) {
                 myThreadPoolExecutorV1.execute(() -> {
                     while (true) {
                         System.out.println("666:" + Thread.currentThread().getName());
@@ -111,7 +127,8 @@ public class MyThreadPoolExecutorBlogV1Test {
 
         Thread.sleep(5000L);
         Assert.assertTrue(hasRejectedExecutionException);
-        Assert.assertEquals(10, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(maximumPooSize, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(queueCapacity, myThreadPoolExecutorV1.getQueue().size());
     }
 
     /**
@@ -147,5 +164,6 @@ public class MyThreadPoolExecutorBlogV1Test {
         Thread.sleep(10000L);
         // 10s后核心线程就都销毁了
         Assert.assertEquals(0, myThreadPoolExecutorV1.getPoolSize());
+        Assert.assertEquals(0, myThreadPoolExecutorV1.getQueue().size());
     }
 }
