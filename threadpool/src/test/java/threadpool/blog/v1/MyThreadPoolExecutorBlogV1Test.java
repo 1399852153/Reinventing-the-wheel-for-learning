@@ -79,7 +79,7 @@ public class MyThreadPoolExecutorBlogV1Test {
      * 有界阻塞队列（队列容量为10）
      * corePoolSize = 5
      * maximumPoolSize = 10
-     * 提交21个任务，最后一个任务提交时触发拒绝策略
+     * 提交21个任务，最多会创建10(maximumPoolSize)个工作线程，最后一个任务提交时触发拒绝策略
      * */
     @Test
     public void testBoundedQueueHasReject() throws InterruptedException {
@@ -93,10 +93,9 @@ public class MyThreadPoolExecutorBlogV1Test {
         boolean hasRejectedExecutionException = false;
         try {
             for (int i = 0; i < 21; i++) {
-                System.out.println("i=" + i);
                 myThreadPoolExecutorV1.execute(() -> {
                     while (true) {
-//                        System.out.println("666:" + Thread.currentThread().getName());
+                        System.out.println("666:" + Thread.currentThread().getName());
                         try {
                             Thread.sleep(1000L);
                         } catch (InterruptedException e) {
@@ -113,6 +112,5 @@ public class MyThreadPoolExecutorBlogV1Test {
         Thread.sleep(5000L);
         Assert.assertTrue(hasRejectedExecutionException);
         Assert.assertEquals(10, myThreadPoolExecutorV1.getPoolSize());
-
     }
 }
