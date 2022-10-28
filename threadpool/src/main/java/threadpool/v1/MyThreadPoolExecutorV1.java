@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * v1版本只实现
+ * 实验性质的v1版本
  * @author xiongyx
  * @date 2021/5/7
  */
@@ -442,13 +442,13 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor {
             int workerCount = workerCountOf(currentCtl);
             if (core) {
                 // 创建的是核心线程，判断当前线程数是否已经超过了指定的核心线程数
-                if (workerCount > this.corePoolSize) {
+                if (workerCount >= this.corePoolSize) {
                     // 超过了核心线程数，创建核心worker线程失败
                     return false;
                 }
             } else {
                 // 创建的是非核心线程，判断当前线程数是否已经超过了指定的最大线程数
-                if (workerCount > this.maximumPoolSize) {
+                if (workerCount >= this.maximumPoolSize) {
                     // 超过了最大线程数，创建非核心worker线程失败
                     return false;
                 }
