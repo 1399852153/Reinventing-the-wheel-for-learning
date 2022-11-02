@@ -60,4 +60,19 @@
 因此我们实现的线程池MyThreadPoolExecutor也会分为两个版本，v1版本只实现前一部分即正常运行时执行任务的逻辑，将有关线程池优雅停止的逻辑全部去除。
 相比直接啃jdk最终实现的源码，v1版本的实现会更简单更易理解，让正常执行任务时的逻辑更加清洗而不会耦合太多优雅停止的逻辑。
 
+##### 线程池初始化（成员变量以及构造函数参数介绍）
+##### Worker工作线程
+##### 提交任务execute
+1. addWorker
+2. addWorkerFailed
+3. runWorker
+4. getTask
+5. processWorkerExit
+##### jdk默认的四种拒绝策略
+##### jdk默认的四种线程池实现（todo）
+##### 动态修改配置参数
+1. allowCoreThreadTimeOut
+2. setCorePoolSize
+3. setMaximumPoolSize
+
 ### 总结
