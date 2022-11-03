@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
 
     /**
-     * 指定的核心线程数量
+     * 指定的最大核心线程数量
      */
     private volatile int corePoolSize;
 
