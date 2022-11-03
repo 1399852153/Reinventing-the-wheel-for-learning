@@ -57,15 +57,45 @@
 通过模仿jdk的ThreadPoolExecutor实现，从零开始实现一个线程池，可以迫使自己去仔细的捋清楚jdk线程池中设计的各种细节，加深理解以达到更好的学习效果。
 #####
 前面提到ThreadPoolExecutor的核心逻辑主要分为两部分，一是正常运行时处理提交的任务的逻辑，二是实现优雅停止的逻辑。
-因此我们实现的线程池MyThreadPoolExecutor也会分为两个版本，v1版本只实现前一部分即正常运行时执行任务的逻辑，将有关线程池优雅停止的逻辑全部去除。
+因此我们实现的线程池MyThreadPoolExecutor（以My开头用于区分）也会分为两个版本，v1版本只实现前一部分即正常运行时执行任务的逻辑，将有关线程池优雅停止的逻辑全部去除。
 相比直接啃jdk最终实现的源码，v1版本的实现会更简单更易理解，让正常执行任务时的逻辑更加清洗而不会耦合太多优雅停止的逻辑。
 
 ### 线程池关键成员变量介绍
 ThreadPoolExecutor中有许多的成员变量，大致可以分为三类。
-1. 可由用户自定义的、用于控制线程池运行的配置参数
-比如：corePoolSize（最大核心线程数量）、maximumPoolSize（最大线程数量）、todo
-2. 仅供线程池内部工作时使用的数据结构：
-3. 记录线程池运行过程中的一些关键指标：
+#### 可由用户自定义的、用于控制线程池运行的配置参数
+1. volatile int corePoolSize（最大核心线程数量）
+2. volatile int maximumPoolSize（最大线程数量）
+3. volatile long keepAliveTime（idle线程保活时间）
+4. final BlockingQueue workQueue（工作队列（阻塞队列））
+5. volatile ThreadFactory threadFactory（工作线程工厂）
+6. volatile RejectedExecutionHandler handler（拒绝异常处理器）
+7. volatile boolean allowCoreThreadTimeOut（是否允许核心线程在idle超时后退出）
+#####
+其中前6个配置参数都可以在ThreadPoolExecutor的构造函数中指定，而allowCoreThreadTimeOut则可以通过暴露的public方法allowCoreThreadTimeOut来动态的设置。  
+而且其中大部分属性都是volatile修饰的，目的是让运行过程中可以用过提供的public方法动态修改这些值后，线程池中的活跃的工作线程或者提交任务的用户线程能及时的感知到变化（线程间的可见性），并进行响应（比如令核心线程自动的idle退出）  
+这些配置属性具体如何控制线程池行为的原理都会在下面的源码解析中展开介绍。理解这些参数的工作原理后才能在实际的业务中使用线程池时为其设置合理的值。
+#### 仅供线程池内部工作时使用的属性
+1. ReentrantLock mainLock（用于控制各种临界区逻辑的并发）
+2. HashSet<Worker> workers（当前活跃工作线程Worker的集合，工作线程的工作原理会在下文介绍）
+3. AtomicInteger ctl（线程池控制状态，control的简写）
+#####
+这里重点介绍一下ctl属性。ctl虽然是一个32位的整型字段（AtomicInteger），但实际上却用于标识两个业务属性，即当前线程池的运行状态和worker线程的总数量。  
+在线程池初始化时状态位RUNNING，worker线程数量位0（private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));）。  
+ctl的32位中的高3位用于标识线程池当前的状态，剩余的29位用于标识线程池中worker线程的数量（因此理论上ThreadPoolExecutor最大可容纳的线程数并不是2^31-1(32位中符号要占一位)，而是2^29-1）  
+由于聚合之后单独的读写某一个属性不是很方便，所以ThreadPoolExecutor中提供了很多基于位运算的辅助函数来简化这些逻辑。  
+#####
+**ctl这样聚合的设计比起拆分成两个独立的字段有什么好处？**  
+在ThreadPoolExecutor中关于优雅停止的逻辑中有很多地方是需要**同时判断**当前工作线程数量与线程池状态后，再对线程池状态工作线程数量进行更新的（具体逻辑在下一篇v2版本的博客中展开）。  
+且为了执行效率，不使用互斥锁而是通过cas重试的方法来解决并发更新的问题。而对一个AtomicInteger属性做cas重试的更新，要比同时控制两个属性进行cas的更新要简单很多，执行效率也高很多。
+#####
+ThreadPoolExecutor共有五种状态，但有四种都和优雅停止有关（除了RUNNING）。
+但由于v1版本的MyThreadPoolExecutorV1不支持优雅停止，所以不在本篇博客中讲解这些状态具体的含义以及其是如何变化的（下一篇v2版本的博客中展开）
+
+#### 记录线程池运行过程中的一些关键指标
+1. completedTaskCount（线程池自启动后已完成的总任务数）
+2. largestPoolSize（线程池自启动后工作线程个数的最大值）
+在运行过程中，ThreadPoolExecutor会在对应的地方进行埋点，统计一些指标并提供相应的api给用户实时的查询，以提高线程池工作时的可观测性。
+#####
 ```java
 public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     
@@ -87,7 +117,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
    /**
     * 存放任务的工作队列(阻塞队列)
     * */
-   private volatile BlockingQueue<Runnable> workQueue;
+   private final BlockingQueue<Runnable> workQueue;
 
    /**
     * 线程工厂
@@ -121,14 +151,14 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
 
    /**
     * 当前线程池中存在的worker线程数量 + 状态的一个聚合（通过一个原子int进行cas，来避免对两个业务属性字段加锁来保证一致性）
-    * v1版本只关心
+    * v1版本只关心前者，即worker线程数量
     */
    private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
    private static final int COUNT_BITS = Integer.SIZE - 3;
 
    /**
     * 32位的有符号整数，有3位是用来存放线程池状态的，所以用来维护当前工作线程个数的部分就只能用29位了
-    * 被占去的3位中，有1位原来的符号位，2位是原来的数值位。所以的值为Integer.MAX的4分之一((Integer.MAX_VALUE / 4) == CAPACITY)
+    * 被占去的3位中，有1位原来的符号位，2位是原来的数值位。
     * */
    private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 

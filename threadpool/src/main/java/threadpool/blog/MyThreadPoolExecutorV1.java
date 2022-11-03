@@ -32,7 +32,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     /**
      * 存放任务的工作队列(阻塞队列)
      * */
-    private volatile BlockingQueue<Runnable> workQueue;
+    private final BlockingQueue<Runnable> workQueue;
 
     /**
      * 线程工厂
@@ -65,15 +65,20 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     private final HashSet<MyWorker> workers = new HashSet<>();
 
     /**
+     * 默认的拒绝策略：AbortPolicy
+     * */
+    private static final MyRejectedExecutionHandler defaultHandler = new MyAbortPolicy();
+
+    /**
      * 当前线程池中存在的worker线程数量 + 状态的一个聚合（通过一个原子int进行cas，来避免对两个业务属性字段加锁来保证一致性）
-     * v1版本只关心
+     * v1版本只关心前者，即worker线程数量
      */
     private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
     private static final int COUNT_BITS = Integer.SIZE - 3;
 
     /**
      * 32位的有符号整数，有3位是用来存放线程池状态的，所以用来维护当前工作线程个数的部分就只能用29位了
-     * 被占去的3位中，有1位原来的符号位，2位是原来的数值位。所以的值为Integer.MAX的4分之一((Integer.MAX_VALUE / 4) == CAPACITY)
+     * 被占去的3位中，有1位原来的符号位，2位是原来的数值位
      * */
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
 
