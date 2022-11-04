@@ -263,7 +263,7 @@ Worker内封装的实际的工作线程对象thread，其在构造函数中由�
 对AQS互斥模式不太了解的读者可以参考一下我之前关于AQS互斥模式的博客：https://www.cnblogs.com/xiaoxiongcanguan/p/15158618.html  
 AQS中维护了一个int类型的state成员变量，其具体的含义由使用者自己赋予。
 在Worker类中，state可能有三种情况：
-1. state=-1，标识工作线程还未启动
+1. state=-1，标识工作线程还未启动（不会被interruptIfStarted打断）
 2. state=0，标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
 3. state=1，标识worker线程正在执行任务（runWorker方法中，成功获得任务后，通过lock方法将state设置为1）
 #####
