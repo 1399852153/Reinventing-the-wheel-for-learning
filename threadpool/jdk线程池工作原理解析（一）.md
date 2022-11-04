@@ -242,10 +242,107 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
       this.threadFactory = threadFactory;
       this.handler = handler;
    }
+
+   public ThreadFactory getThreadFactory() {
+      return threadFactory;
+   }
 }
 ```
-##### Worker工作线程
+#### Worker工作线程
+ThreadPoolExecutor中的工作线程并不是裸的Thread,而是被封装在了一个Worker的内部类中。  
+Worker实现了Runnable所以可以作为一个普通的线程来启动，在run方法中只是简单的调用了一下runWorker(runWorker后面再展开)。  
+Worker类有三个成员属性：
+1. Thread thread（被封装的工作线程对象）
+2. Runnable firstTask（提交任务时，创建新Worker对象时指定的第一次要执行的任务（后续线程就会去拉取工作队列里的任务执行了））
+3. volatile long completedTasks（统计用，计算当前工作线程总共完成了多少个任务）
+#####
+Worker内封装的实际的工作线程对象thread，其在构造函数中由线程池的线程工厂threadFactory生成，传入this，所以thread在start后，便会调用run方法进而执行runWorker。
+线程工厂可以由用户在创建线程池时通过参数指定，因此用户在自由控制所生成的工作线程的同时，也需要保证newThread能正确的返回一个可用的线程对象。
+#####
+除此之外，Worker对象还继承了AbstractQueuedSynchronizer（AQS）类，简单的实现了一个不可重入的互斥锁。  
+对AQS互斥模式不太了解的读者可以参考一下我之前关于AQS互斥模式的博客：https://www.cnblogs.com/xiaoxiongcanguan/p/15158618.html  
+AQS中维护了一个int类型的state成员变量，其具体的含义由使用者自己赋予。
+在Worker类中，state可能有三种情况：
+1. state=-1，标识工作线程还未启动
+2. state=0，标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
+3. state=1，标识worker线程正在执行任务（runWorker方法中，成功获得任务后，通过lock方法将state设置为1）
+#####
+具体这三种情况分别在什么时候出现会在后续的runWorker方法中详细介绍。
+```java
+    /**
+     * jdk的实现中令Worker继承AbstractQueuedSynchronizer并实现了一个不可重入的锁
+     * AQS中的state属性含义
+     * -1：标识工作线程还未启动
+     *  0：标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
+     *  1：标识worker线程正在执行任务（runWorker中，成功获得任务后，通过lock方法将state设置为1）
+     * */
+    private final class MyWorker extends AbstractQueuedSynchronizer implements Runnable{
 
+        final Thread thread;
+        Runnable firstTask;
+        volatile long completedTasks;
+
+        public MyWorker(Runnable firstTask) {
+            this.firstTask = firstTask;
+
+            // newThread可能是null
+            this.thread = getThreadFactory().newThread(this);
+        }
+
+        @Override
+        public void run() {
+            runWorker(this);
+        }
+
+        protected boolean isHeldExclusively() {
+            return getState() != 0;
+        }
+
+        protected boolean tryAcquire(int unused) {
+            if (compareAndSetState(0, 1)) {
+                setExclusiveOwnerThread(Thread.currentThread());
+                return true;
+            }
+            return false;
+        }
+
+        protected boolean tryRelease(int unused) {
+            setExclusiveOwnerThread(null);
+            setState(0);
+            return true;
+        }
+
+        public void lock(){
+            acquire(1);
+        }
+
+        public boolean tryLock(){
+            return tryAcquire(1);
+        }
+
+        public void unlock(){
+            release(1);
+        }
+
+        public boolean isLocked(){
+            return isHeldExclusively();
+        }
+
+        void interruptIfStarted() {
+            Thread t;
+            // 三个条件同时满足，才去中断Worker对应的thread
+            // getState() >= 0,用于过滤还未执行runWorker的，刚入队初始化的Worker
+            // thread != null，用于过滤掉构造方法中ThreadFactory.newThread返回null的Worker
+            // !t.isInterrupted()，用于过滤掉那些已经被其它方式中断的Worker线程(比如用户自己去触发中断，提前终止线程池中的任务)
+            if (getState() >= 0 && (t = thread) != null && !t.isInterrupted()) {
+                try {
+                    t.interrupt();
+                } catch (SecurityException ignore) {
+                }
+            }
+        }
+    }
+```
 ##### 提交任务execute
 1. addWorker
 2. addWorkerFailed

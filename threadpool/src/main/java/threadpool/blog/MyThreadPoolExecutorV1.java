@@ -702,11 +702,10 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     // =============================== worker线程内部类 =====================================
     /**
      * jdk的实现中令Worker继承AbstractQueuedSynchronizer并实现了一个不可重入的锁
-     * 1 AQS中的state属性含义
+     * AQS中的state属性含义
      * -1：标识工作线程还未启动
      *  0：标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
      *  1：标识worker线程正在执行任务（runWorker中，成功获得任务后，通过lock方法将state设置为1）
-     * 2
      * */
     private final class MyWorker extends AbstractQueuedSynchronizer implements Runnable{
 
