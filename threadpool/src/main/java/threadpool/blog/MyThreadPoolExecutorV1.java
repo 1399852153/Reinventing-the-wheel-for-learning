@@ -167,13 +167,16 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         return threadFactory;
     }
 
+    /**
+     * 提交任务，并执行
+     * */
     public void execute(Runnable command) {
         if (command == null){
             throw new NullPointerException("command参数不能为空");
         }
 
         int currentCtl = this.ctl.get();
-        if (workerCountOf(currentCtl) < corePoolSize) {
+        if (workerCountOf(currentCtl) < this.corePoolSize) {
             // 如果当前存在的worker线程数量低于指定的核心线程数量，则创建新的核心线程
             boolean addCoreWorkerSuccess = addWorker(command,true);
             if(addCoreWorkerSuccess){

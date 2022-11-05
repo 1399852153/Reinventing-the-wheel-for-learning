@@ -267,7 +267,7 @@ AQS中维护了一个int类型的state成员变量，其具体的含义由使用
 2. state=0，标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
 3. state=1，标识worker线程正在执行任务（runWorker方法中，成功获得任务后，通过lock方法将state设置为1）
 #####
-具体这三种情况分别在什么时候出现会在后续的runWorker方法中详细介绍。
+具体这三种情况分别在什么时候出现会在下面解析提交任务源码的那部分里详细介绍。
 ```java
     /**
      * jdk的实现中令Worker继承AbstractQueuedSynchronizer并实现了一个不可重入的锁
@@ -343,7 +343,61 @@ AQS中维护了一个int类型的state成员变量，其具体的含义由使用
         }
     }
 ```
-##### 提交任务execute
+#### execute执行提交的任务
+下面介绍本篇博客的重点，即线程池是如何执行用户所提交的任务的。  
+用户提交任务的入口是public的execute方法，Runnable类型的参数command就是提交的要执行的任务。
+##### MyThreadPoolExecutorV1的execute方法（相比jdk的实现v1版本去掉了关于优雅停止的逻辑）
+```java
+   /**
+     * 提交任务，并执行
+     * */
+    public void execute(Runnable command) {
+        if (command == null){
+            throw new NullPointerException("command参数不能为空");
+        }
+
+        int currentCtl = this.ctl.get();
+        if (workerCountOf(currentCtl) < this.corePoolSize) {
+            // 如果当前存在的worker线程数量低于指定的核心线程数量，则创建新的核心线程
+            boolean addCoreWorkerSuccess = addWorker(command,true);
+            if(addCoreWorkerSuccess){
+                // addWorker添加成功，直接返回即可
+                return;
+            }
+        }
+
+        // 走到这里有两种情况
+        // 1 因为核心线程超过限制（workerCountOf(currentCtl) < corePoolSize == false），需要尝试尝试将任务放入阻塞队列
+        // 2 addWorker返回false，创建核心工作线程失败
+        if(this.workQueue.offer(command)){
+            // workQueue.offer入队成功
+
+            if(workerCountOf(currentCtl) == 0){
+                // 在corePoolSize为0的情况下，当前不存在存活的核心线程
+                // 一个任务在入队之后，如果当前线程池中一个线程都没有，则需要兜底的创建一个非核心线程来处理入队的任务
+                // 因此firstTask为null，目的是先让任务先入队后创建线程去拉取任务并执行
+                addWorker(null,false);
+            }else{
+                // 加入队列成功，且当前存在worker线程，成功返回
+                return;
+            }
+        }else{
+            // 阻塞队列已满，尝试创建一个新的非核心线程处理
+            boolean addNonCoreWorkerSuccess = addWorker(command,false);
+            if(!addNonCoreWorkerSuccess){
+                // 创建非核心线程失败，执行拒绝策略（失败的原因和前面创建核心线程addWorker的原因类似）
+                reject(command);
+            }else{
+                // 创建非核心线程成功，成功返回
+                return;
+            }
+        }
+    }
+```
+可以看到，execute方法源码中对于任务处理的逻辑很清晰，也能与[ThreadPoolExecutor运行时工作流程](#ThreadPoolExecutor运行时工作流程)中的流程所匹配
+
+
+
 1. addWorker
 2. addWorkerFailed
 3. runWorker
