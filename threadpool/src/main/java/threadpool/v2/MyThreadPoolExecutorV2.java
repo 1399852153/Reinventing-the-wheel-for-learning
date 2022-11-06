@@ -561,7 +561,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
                     task = null;
                     // 无论执行时是否存在异常，已完成的任务数加1
                     myWorker.completedTasks++;
-                    // 无论如何
+                    // 无论如何将myWorker解锁，标识为idle状态
                     myWorker.unlock();
                 }
 

@@ -260,7 +260,7 @@ Worker内封装的实际的工作线程对象thread，其在构造函数中由�
 线程工厂可以由用户在创建线程池时通过参数指定，因此用户在自由控制所生成的工作线程的同时，也需要保证newThread能正确的返回一个可用的线程对象。
 #####
 除此之外，Worker对象还继承了AbstractQueuedSynchronizer（AQS）类，简单的实现了一个不可重入的互斥锁。  
-对AQS互斥模式不太了解的读者可以参考一下我之前关于AQS互斥模式的博客：https://www.cnblogs.com/xiaoxiongcanguan/p/15158618.html  
+对AQS互斥模式不太了解的读者可以参考一下我之前关于AQS互斥模式的博客：[AQS互斥模式与ReentrantLock可重入锁原理解析](https://www.cnblogs.com/xiaoxiongcanguan/p/14640699.html)  
 AQS中维护了一个int类型的state成员变量，其具体的含义由使用者自己赋予。
 在Worker类中，state可能有三种情况：
 1. state=-1，标识工作线程还未启动（不会被interruptIfStarted打断）
@@ -550,8 +550,16 @@ addWorker中工作线程可能会启动失败，所以要对addWorker中对worke
 ```
 #### runWorker（工作线程核心执行逻辑）
 前面介绍了用户是如何向线程池提交任务，以及如何创建新工作线程Worker的。下面介绍工作线程在线程池中是如何运行的。
+* runWorker内部本质上是一个无限循环，在进入主循环之前通过unlock方法，将内部AQS父类中的state标识为0，允许被外部中断（可以被interruptIfStarted选中而打断）
+* 之后便是主循环，如果firstTask不为空（说明第一次启动），则直接调用task.run方法。否则通过getTask方法尝试从工作队列中捞取一个任务来执行
+* 在实际的任务执行前和执行后都调用对应的钩子方法（beforeExecute、afterExecute）
+* 在任务执行前通过lock方法将AQS的state方法设置为1代表当前Worker正在执行任务，并在执行完一个任务后在finally中进行unlock解锁，令当前工作线程进入idle状态。  
+  同时清空firstTask的值（清空后下一次循环就会通过getTask获取任务了）并令Worker中的completedTasks统计指标也自增1
+* 如果任务执行过程中出现了异常，则catch住并最终向上抛出跳出主循环，finally中执行processWorkerExit(认为任务一旦执行出现了异常，则很可能工作线程内部的一些数据已经损坏，需要重新创建一个新的工作线程来代替出异常的老工作线程)
+* 有两种情况会导致执行processWorkerExit，一种是上面说的任务执行时出现了异常，此时completedAbruptly=true；还有一种可能时getTask因为一些原因返回了null，此时completedAbruptly=false。
+  completedAbruptly会作为processWorkerExit的参数传递。
 ```java
-   /**
+/**
      * worker工作线程主循环执行逻辑
      * */
     private void runWorker(MyWorker myWorker) {
@@ -562,11 +570,21 @@ addWorker中工作线程可能会启动失败，所以要对addWorker中对worke
         // 已经暂存了firstTask，将其清空（有地方根据firstTask是否存在来判断工作线程中负责的任务是否是新提交的）
         myWorker.firstTask = null;
 
+        // 将state由初始化时的-1设置为0
+        // 标识着此时当前工作线程开始工作了，这样可以被interruptIfStarted选中
+        myWorker.unlock();
+
         // 默认线程是由于中断退出的
         boolean completedAbruptly = true;
         try {
             // worker线程处理主循环，核心逻辑
             while (task != null || (task = getTask()) != null) {
+                // 将state由0标识为1，代表着其由idle状态变成了正在工作的状态
+                // 这样interruptIdleWorkers中的tryLock会失败，这样工作状态的线程就不会被该方法中断任务的正常执行
+                myWorker.lock();
+
+                // v1版本此处省略优雅停止相关的核心逻辑
+
                 try {
                     // 任务执行前的钩子函数
                     beforeExecute(workerThread, task);
@@ -593,6 +611,8 @@ addWorker中工作线程可能会启动失败，所以要对addWorker中对worke
                     task = null;
                     // 无论执行时是否存在异常，已完成的任务数加1
                     myWorker.completedTasks++;
+                    // 无论如何将myWorker解锁，标识为idle状态
+                    myWorker.unlock();
                 }
 
             }
@@ -611,14 +631,166 @@ addWorker中工作线程可能会启动失败，所以要对addWorker中对worke
         }
     }
 ```
+##### getTask尝试获取任务执行
+runWorker中是通过getTask获取任务的，getTask中包含着工作线程是如何从工作队列中获取任务的关键逻辑。
+* 在获取任务前，需要通过getTask检查当前线程池的线程数量是否超过了参数配置（启动后被动态调整了），因此需要先获得当前线程池工作线程总数workCount。
+  如果当前工作线程数量超过了指定的最大线程个数maximumPoolSize限制，则说明当前线程需要退出了
+* timed标识用于决定当前线程如何从工作队列（阻塞队列）中获取新任务，如果timed为true则通过poll方法获取同时指定相应的超时时间（配置参数keepAliveTime），如果timed为false则通过take方法无限期的等待。
+  如果工作队列并不为空，则poll和take方法都会立即返回一个任务对象。而当工作队列为空时，工作线程则会阻塞在工作队列上以让出CPU（idle状态）直到有新的任务到来而被唤醒（或者超时唤醒）。  
+  这也是存储任务的workQueue不能是普通的队列，而必须是阻塞队列的原因。（对阻塞队列工作原理不太清楚的读者可以参考我以前的博客：[自己动手实现一个阻塞队列](https://www.cnblogs.com/xiaoxiongcanguan/p/14640699.html)）
+* timed的值由两方面共同决定。一是配置参数allowCoreThreadTimeOut是否为true，为true的话说明不管是核心线程还是非核心线程都需要在idle等待keepAliveTime后销毁退出。所以allowCoreThreadTimeOut=true，则timed一定为true  
+  二是如果allowCoreThreadTimeOut为false，说明核心线程不需要退出，而非核心线程在idle等待keepAliveTime后需要销毁退出。则判断当前workCount是否大于配置的corePoolSize，是的话则timed为true否则为false。  
+  如果当前线程数超过了指定的最大核心线程数corePoolSize，则需要让工作队列为空时（说明线程池负载较低）部分idle线程退出，使得最终活跃的线程数减少到和corePoolSize一致。  
+  **从这里可以看到，核心与非核心线程的概念在ThreadPoolExecutor里是很弱的，不关心工作线程最初是以什么原因创建的都一视同仁，谁都可能被当作非核心线程而销毁退出。**
+* timedOut标识当前工作线程是否因为poll拉取任务时出现了超时。take永远不会返回null，因此只有poll在超时时会返回null，当poll返回值为null时，表明是等待了keepAliveTime时间后超时了，所以timedOut标识为true。
+  同时如果拉取任务时线程被中断了，则捕获InterruptedException异常，将timeOut标识为false（被中断的就不认为是超时）。
+* 当（workCount > maximumPoolSize）或者 (timed && timedOut)两者满足一个时，就说明当前线程应该要退出了。
+  此时将当前的workCount用cas的方式减去1，返回null代表获取任务失败即可；如果cas失败，则在for循环中重试。
+  但有一种情况是例外的(workCount <= 1 && !workQueue.isEmpty())，即当前工作线程数量恰好为1，且工作队列不为空（那么还需要当前线程继续工作把工作队列里的任务都消费掉，无论如何不能退出）
+```java
+   /**
+     * 尝试着从阻塞队列里获得待执行的任务
+     * @return 返回null代表工作队列为空，没有需要执行的任务; 或者当前worker线程满足了需要退出的一些条件
+     *         返回对应的任务
+     * */
+    private Runnable getTask() {
+        boolean timedOut = false;
 
+        for(;;) {
+            int currentCtl = ctl.get();
 
-3. runWorker
-4. getTask
-5. processWorkerExit
-##### jdk默认的四种拒绝策略
-##### jdk默认的四种线程池实现（todo）
-##### 动态修改配置参数
+            // 获得当前工作线程个数
+            int workCount = workerCountOf(currentCtl);
+
+            // 有两种情况需要指定超时时间的方式从阻塞队列workQueue中获取任务（即timed为true）
+            // 1.线程池配置参数allowCoreThreadTimeOut为true，即允许核心线程在idle一定时间后被销毁
+            //   所以allowCoreThreadTimeOut为true时，需要令timed为true，这样可以让核心线程也在一定时间内获取不到任务(idle状态)而被销毁
+            // 2.线程池配置参数allowCoreThreadTimeOut为false,但当前线程池中的线程数量workCount大于了指定的核心线程数量corePoolSize
+            //   说明当前有一些非核心的线程正在工作，而非核心的线程在idle状态一段时间后需要被销毁
+            //   所以此时也令timed为true，让这些线程在keepAliveTime时间内由于队列为空拉取不到任务而返回null，将其销毁
+            boolean timed = allowCoreThreadTimeOut || workCount > corePoolSize;
+
+            // 有共四种情况不需要往下执行，代表
+            // 1 (workCount > maximumPoolSize && workCount > 1)
+            // 当前工作线程个数大于了指定的maximumPoolSize（可能是由于启动后通过setMaximumPoolSize调小了maximumPoolSize的值）
+            // 已经不符合线程池的配置参数约束了，要将多余的工作线程回收掉
+            // 且当前workCount > 1说明存在不止一个工作线程，意味着即使将当前工作线程回收后也还有其它工作线程能继续处理工作队列里的任务，直接返回null表示自己需要被回收
+
+            // 2 (workCount > maximumPoolSize && workCount <= 1 && workQueue.isEmpty())
+            // 当前工作线程个数大于了指定的maximumPoolSize（maximumPoolSize被设置为0了）
+            // 已经不符合线程池的配置参数约束了，要将多余的工作线程回收掉
+            // 但此时workCount<=1，说明将自己这个工作线程回收掉后就没有其它工作线程能处理工作队列里剩余的任务了
+            // 所以即使maximumPoolSize设置为0，也需要等待任务被处理完，工作队列为空之后才能回收当前线程，否则还会继续拉取剩余任务
+
+            // 3 (workCount <= maximumPoolSize && (timed && timedOut) && workCount > 1)
+            // workCount <= maximumPoolSize符合要求
+            // 但是timed && timedOut，说明timed判定命中，需要以poll的方式指定超时时间，并且最近一次拉取任务超时了timedOut=true
+            // 进入新的一次循环后timed && timedOut成立，说明当前worker线程处于idle状态等待任务超过了规定的keepAliveTime时间,需要回收当前线程
+            // 且当前workCount > 1说明存在不止一个工作线程，意味着即使将当前工作线程回收后也还有其它工作线程能继续处理工作队列里的任务，直接返回null表示自己需要被回收
+
+            // 4 (workCount <= maximumPoolSize && (timed && timedOut) && workQueue.isEmpty())
+            // workCount <= maximumPoolSize符合要求
+            // 但是timed && timedOut，说明timed判定命中，需要以poll的方式指定超时时间，并且最近一次拉取任务超时了timedOut=true
+            // 进入新的一次循环后timed && timedOut成立，说明当前worker线程处于idle状态等待任务超过了规定的keepAliveTime时间,需要回收当前线程
+            // 但此时workCount<=1，说明将自己这个工作线程回收掉后就没有其它工作线程能处理工作队列里剩余的任务了
+            // 所以即使timed && timedOut超时逻辑匹配，也需要等待任务被处理完，工作队列为空之后才能回收当前线程，否则还会继续拉取剩余任务
+            if ((workCount > maximumPoolSize || (timed && timedOut))
+                    && (workCount > 1 || workQueue.isEmpty())) {
+                if (compareAndDecrementWorkerCount(currentCtl)) {
+                    // 满足上述条件，说明当前线程需要被销毁了，返回null
+                    return null;
+                }
+
+                // compareAndDecrementWorkerCount方法由于并发的原因cas执行失败，continue循环重试
+                continue;
+            }
+
+            try {
+                // 根据上面的逻辑的timed标识，决定以什么方式从阻塞队列中获取任务
+                Runnable r = timed ?
+                        // timed为true，通过poll方法指定获取任务的超时时间（如果指定时间内没有队列依然为空，则返回）
+                        workQueue.poll(keepAliveTime, TimeUnit.NANOSECONDS) :
+                        // timed为false，通过take方法无限期的等待阻塞队列中加入新的任务
+                        workQueue.take();
+                if (r != null) {
+                    // 获得了新的任务，getWork正常返回对应的任务对象
+                    return r;
+                }else{
+                    // 否则说明timed=true，且poll拉取任务时超时了
+                    timedOut = true;
+                }
+            } catch (InterruptedException retry) {
+                // poll or take任务等待时worker线程被中断了，捕获中断异常
+                // timeout = false,标识拉取任务时没有超时
+                timedOut = false;
+            }
+        }
+    }
+```
+##### processWorkerExit（处理工作线程退出）
+在runWorker中，如果getTask方法没有拿到任务返回了null或者任务在执行时抛出了异常就会在最终的finally块中调用processWorkerExit方法，令当前工作线程销毁退出。  
+* processWorkerExit方法内会将当前线程占用的一些资源做清理，比如从workers中移除掉当前线程（利于Worker对象的GC），并令当前线程workerCount减一（completedAbruptly=true，说明是中断导致的退出，getTask中没来得及减workerCount，在这里补正）
+* completedAbruptly=true，说明是runWorker中任务异常导致的线程退出，无条件的通过addWorker重新创建一个新的工作线程代替当前退出的工作线程。
+* completedAbruptly=false，在退出当前工作线程后，需要判断一下退出后当前所存活的工作线程数量是否满足要求。
+  比如allowCoreThreadTimeOut=false时，当前工作线程个数是否不低于corePoolSize等，如果不满足要求则通过addWorker重新创建一个新的线程。
+##### 工作线程退出时所占用资源的回收
+* **processWorkerExit方法执行完毕后，当前工作线程就完整的从当前线程池中退出了（workers中没有了引用，workerCount减1了），GC便会将内存中的Worker对象所占用的内存给回收掉。**
+* **同时runWorker中最后执行完processWorkerExit后，工作线程的run方法也return了，标识着整个线程正常退出了，操作系统层面上也会将线程转为终止态并最终回收。至此，线程占用的所有资源就被彻底的回收干净了。**
+```java
+ /**
+     * 处理worker线程退出
+     * @param myWorker 需要退出的工作线程对象
+     * @param completedAbruptly 是否是因为中断异常的原因，而需要回收
+     * */
+    private void processWorkerExit(MyWorker myWorker, boolean completedAbruptly) {
+        if (completedAbruptly) {
+            // 如果completedAbruptly=true，说明是任务在run方法执行时出错导致的线程退出
+            // 而正常退出时completedAbruptly=false，在getTask中已经将workerCount的值减少了
+            decrementWorkerCount();
+        }
+
+        ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            // 线程池全局总完成任务数累加上要退出的工作线程已完成的任务数
+            this.completedTaskCount += myWorker.completedTasks;
+            // workers集合中将当前工作线程剔除
+            workers.remove(myWorker);
+
+            // completedTaskCount是long类型的，workers是HashSet，
+            // 都是非线程安全的，所以在mainLock的保护进行修改
+        } finally {
+            mainLock.unlock();
+        }
+
+        int currentCtl = this.ctl.get();
+
+        if (!completedAbruptly) {
+            // completedAbruptly=false，说明不是因为中断异常而退出的
+            // min标识当前线程池允许的最小线程数量
+            // 1 如果allowCoreThreadTimeOut为true，则核心线程也可以被销毁，min=0
+            // 2 如果allowCoreThreadTimeOut为false，则min应该为所允许的核心线程个数，min=corePoolSize
+            int min = allowCoreThreadTimeOut ? 0 : corePoolSize;
+            if (min == 0 && ! workQueue.isEmpty()) {
+                // 如果min为0了，但工作队列不为空，则修正min=1，因为至少需要一个工作线程来将工作队列中的任务消费、处理掉
+                min = 1;
+            }
+            if (workerCountOf(currentCtl) >= min) {
+                // 如果当前工作线程数大于了min，当前线程数量是足够的，直接返回（否则要执行下面的addWorker恢复）
+                return;
+            }
+        }
+        // 两种场景会走到这里进行addWorker操作
+        // 1 completedAbruptly=true,说明线程是因为中断异常而退出的，需要重新创建一个新的工作线程
+        // 2 completedAbruptly=false,且上面的workerCount<min，则说明当前工作线程数不够，需要创建一个
+        // 为什么参数core传的是false呢？
+        // 因为completedAbruptly=true而中断退出的线程，无论当前工作线程数是否大于核心线程，都需要创建一个新的线程来代替原有的被退出的线程
+        addWorker(null, false);
+    }
+```
+#### jdk默认的四种拒绝策略
+#### jdk默认的四种线程池实现（todo）
+#### 动态修改配置参数
 1. allowCoreThreadTimeOut
 2. setCorePoolSize
 3. setMaximumPoolSize

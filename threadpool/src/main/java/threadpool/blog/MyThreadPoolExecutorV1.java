@@ -344,11 +344,21 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         // 已经暂存了firstTask，将其清空（有地方根据firstTask是否存在来判断工作线程中负责的任务是否是新提交的）
         myWorker.firstTask = null;
 
+        // 将state由初始化时的-1设置为0
+        // 标识着此时当前工作线程开始工作了，这样可以被interruptIfStarted选中
+        myWorker.unlock();
+
         // 默认线程是由于中断退出的
         boolean completedAbruptly = true;
         try {
             // worker线程处理主循环，核心逻辑
             while (task != null || (task = getTask()) != null) {
+                // 将state由0标识为1，代表着其由idle状态变成了正在工作的状态
+                // 这样interruptIdleWorkers中的tryLock会失败，这样工作状态的线程就不会被该方法中断任务的正常执行
+                myWorker.lock();
+
+                // v1版本此处省略优雅停止相关的逻辑
+
                 try {
                     // 任务执行前的钩子函数
                     beforeExecute(workerThread, task);
@@ -375,6 +385,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
                     task = null;
                     // 无论执行时是否存在异常，已完成的任务数加1
                     myWorker.completedTasks++;
+                    // 无论如何将myWorker解锁，标识为idle状态
+                    myWorker.unlock();
                 }
 
             }
