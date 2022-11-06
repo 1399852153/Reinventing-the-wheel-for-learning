@@ -334,7 +334,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     }
 
     /**
-     * 启动worker工作线程
+     * worker工作线程主循环执行逻辑
      * */
     private void runWorker(MyWorker myWorker) {
         // 时worker线程的run方法调用的，此时的current线程的是worker线程
@@ -617,8 +617,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     /**
      * 当创建worker出现异常失败时，对之前的操作进行回滚
      * 1 如果新创建的worker加入了workers集合，将其移除
-     * 2 减少记录存活的worker个数
-     * 3 检查线程池是否满足中止的状态，防止这个存活的worker线程阻止线程池的中止
+     * 2 减少记录存活的worker个数（cas更新）
+     * 3 检查线程池是否满足中止的状态，防止这个存活的worker线程阻止线程池的中止（v1版本不考虑，省略了tryTerminate）
      */
     private void addWorkerFailed(MyWorker myWorker) {
         final ReentrantLock mainLock = this.mainLock;

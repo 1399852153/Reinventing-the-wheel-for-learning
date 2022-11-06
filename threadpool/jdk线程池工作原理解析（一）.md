@@ -402,6 +402,7 @@ AQS中维护了一个int类型的state成员变量，其具体的含义由使用
     }    
 ```
 可以看到，execute方法源码中对于任务处理的逻辑很清晰，也能与[ThreadPoolExecutor运行时工作流程](#ThreadPoolExecutor运行时工作流程)中所介绍的流程所匹配。
+
 ##### addWorker方法（创建新的工作线程）
 在execute方法中当需要创建核心线程或普通线程时，便需要通过addWorker方法尝试创建一个新的工作线程。
 ```java
@@ -497,22 +498,121 @@ AQS中维护了一个int类型的state成员变量，其具体的含义由使用
     }
 ```
 addWorker可以分为两部分：判断当前是否满足创建新工作线程的条件、创建并启动新的Worker工作线程。
+
 ##### 判断当前是否满足创建新工作线程的条件
 入口处开始的retry标识的for循环部分，便是用于判断是否满足创建新工作线程的条件。 
 * 首先判断当前工作线程数量是否超过了理论的最大值CAPACITY（即2^29-1）,超过了则不能创建，返回false，不创建新工作线程
 * 根据boolean类型参数core判断是否创建核心工作线程，core=true则判断是否超过了corePoolSize的限制，core=false则判断是否超过了maximumPoolSize的限制。不满足则返回false，不创建新工作线程
 * 满足上述限制条件后，则说明可以创建新线程了，compareAndIncrementWorkerCount方法进行cas的增加当前工作线程数。  
-  如果cas失败，则说明存在并发的更新了，则再一次的执行循环重试，并再次的进行上述检查。 
+  如果cas失败，则说明存在并发的更新了，则再一次的循环重试，并再次的进行上述检查。 
 #####
 需要注意的是：这里面有两个for循环的原因在于v1版本省略了优雅停止的逻辑（所以实际上v1版本能去掉内层循环的）。如果线程池处于停止状态则不能再创建新工作线程了，因此也需要判断线程池当前的状态，
 不满足条件则也需要返回false，不创建工作线程。  
 而且compareAndIncrementWorkerCount中cas更新ctl时，如果并发的线程池被停止而导致线程池状态发生了变化，也会导致cas失败重新检查。
 这也是jdk的实现中为什么把线程池状态和工作线程数量绑定在一起的原因之一，这样在cas更新时可以原子性的同时检查两个字段的并发争抢。（更具体的细节会在下一篇博客的v2版本中介绍）
 ##### 创建并启动新的Worker工作线程
+在通过retry那部分的层层条件检查后，紧接着便是实际创建新工作线程的逻辑。
+* 首先通过Worker的构造方法创建一个新的Worker对象，并将用户提交的任务作为firstTask参数传入。
+* 判断Worker在构造时线程工厂是否正确的生成了一个Thread（判空），如果thread == null的话直接返回false，标识创建新工作线程失败。
+* 在mainLock的保护下，将新创建的worker线程加入workers集合中
+* 启动Worker中的线程（myWorkerThread.start()）,启动后会执行Worker类中的run方法，新的工作线程会执行runWorker方法（下文会展开分析runWorker）
+* 如果Worker中的线程不是alive状态等原因导致工作线程启动失败，则在finally中通过addWorkerFailed进行一系列的回滚操作
+#####
+**虽然在前面线程池工作流程的分析中提到了核心线程与非核心线程的概念，但Worker类中实际上并没有核心/非核心的标识。
+在经过了工作线程启动前的条件判断后，新创建的工作线程实际上并没有真正的核心与非核心的差别。**
+
+#### addWorkerFailed（addWorker的逆向回滚操作）
+addWorker中工作线程可能会启动失败，所以要对addWorker中对workers集合以及workerCount等数据的操作进行回滚。
+```java
+   /**
+     * 当创建worker出现异常失败时，对之前的操作进行回滚
+     * 1 如果新创建的worker加入了workers集合，将其移除
+     * 2 减少记录存活的worker个数（cas更新）
+     * 3 检查线程池是否满足中止的状态，防止这个存活的worker线程阻止线程池的中止（v1版本不考虑，省略了tryTerminate）
+     */
+    private void addWorkerFailed(MyWorker myWorker) {
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            if (myWorker != null) {
+                // 如果新创建的worker加入了workers集合，将其移除
+                workers.remove(myWorker);
+            }
+            // 减少存活的worker个数
+            decrementWorkerCount();
+
+            // 尝试着将当前worker线程终止(addWorkerFailed由工作线程自己调用)
+            // tryTerminate();
+        } finally {
+            mainLock.unlock();
+        }
+    }
+```
+#### runWorker（工作线程核心执行逻辑）
+前面介绍了用户是如何向线程池提交任务，以及如何创建新工作线程Worker的。下面介绍工作线程在线程池中是如何运行的。
+```java
+   /**
+     * worker工作线程主循环执行逻辑
+     * */
+    private void runWorker(MyWorker myWorker) {
+        // 时worker线程的run方法调用的，此时的current线程的是worker线程
+        Thread workerThread = Thread.currentThread();
+
+        Runnable task = myWorker.firstTask;
+        // 已经暂存了firstTask，将其清空（有地方根据firstTask是否存在来判断工作线程中负责的任务是否是新提交的）
+        myWorker.firstTask = null;
+
+        // 默认线程是由于中断退出的
+        boolean completedAbruptly = true;
+        try {
+            // worker线程处理主循环，核心逻辑
+            while (task != null || (task = getTask()) != null) {
+                try {
+                    // 任务执行前的钩子函数
+                    beforeExecute(workerThread, task);
+                    Throwable thrown = null;
+                    try {
+                        // 拿到的任务开始执行
+                        task.run();
+                    } catch (RuntimeException | Error x) {
+                        // 使用thrown收集抛出的异常，传递给afterExecute
+                        thrown = x;
+                        // 同时抛出错误，从而中止主循环
+                        throw x;
+                    } catch (Throwable x) {
+                        // 使用thrown收集抛出的异常，传递给afterExecute
+                        thrown = x;
+                        // 同时抛出错误，从而中止主循环
+                        throw new Error(x);
+                    } finally {
+                        // 任务执行后的钩子函数，如果任务执行时抛出了错误/异常，thrown不为null
+                        afterExecute(task, thrown);
+                    }
+                } finally {
+                    // 将task设置为null,令下一次while循环通过getTask获得新任务
+                    task = null;
+                    // 无论执行时是否存在异常，已完成的任务数加1
+                    myWorker.completedTasks++;
+                }
+
+            }
+            // getTask返回了null，说明没有可执行的任务或者因为idle超时、线程数超过配置等原因需要回收当前线程。
+            // 线程正常的退出，completedAbruptly为false
+            completedAbruptly = false;
+        }finally {
+            // getTask返回null，线程正常的退出，completedAbruptly值为false
+            // task.run()执行时抛出了异常/错误，直接跳出了主循环，此时completedAbruptly为初始化时的默认值true
+            processWorkerExit(myWorker, completedAbruptly);
+
+            // processWorkerExit执行完成后，worker线程对应的run方法(run->runWorker)也会执行完毕
+            // 此时线程对象会进入终止态，等待操作系统回收
+            // 而且processWorkerExit方法内将传入的Worker从workers集合中移除，jvm中的对象也会因为不再被引用而被GC回收
+            // 此时，当前工作线程所占用的所有资源都已释放完毕
+        }
+    }
+```
 
 
-1. addWorker
-2. addWorkerFailed
 3. runWorker
 4. getTask
 5. processWorkerExit
