@@ -788,7 +788,88 @@ runWorker中是通过getTask获取任务的，getTask中包含着工作线程是
         addWorker(null, false);
     }
 ```
-#### jdk默认的四种拒绝策略
+#####
+借助v1版本的MyThreadPoolExecutor源码，已经将jdk的线程池ThreadPoolExecutor在RUNNING状态下提交任务，启动工作线程执行任务等核心逻辑介绍完毕了（不考虑优雅停止）。
+#### jdk线程池默认支持的四种拒绝策略
+jdk线程池支持用户传入自定义的拒绝策略处理器，只需要传入实现了RejectedExecutionHandler接口的对象就行。  
+而jdk在ThreadPoolExecutor中提供了默认的四种拒绝策略方便用户使用。
+1. **AbortPolicy**  
+  拒绝接受任务时会抛出RejectedExecutionException，能让提交任务的一方感知到异常的策略。**适用于大多数场景，也是jdk默认的拒绝策略。**
+2. **DiscardPolicy**  
+  直接丢弃任务的拒绝策略。简单的直接丢弃任务，适用于对任务执行成功率要求不高的场合
+3. **DiscardOldestPolicy**  
+  丢弃当前工作队列中最早入队的任务，然后将当前任务重新提交。适用于后出现的任务能够完全代替之前任务的场合(追求最终一致性)
+4. **CallerRunsPolicy**  
+  令调用者线程自己执行所提交任务的拒绝策略。在线程池压力过大时，让提交任务的线程自己执行该任务（异步变同步），能有效地降低线程池的压力，也不会丢失任务，但可能导致整体业务吞吐量大幅降低。
+#####
+上面介绍的四种jdk默认拒绝策略分别适应不同的业务场景，需要用户仔细考虑最适合的拒绝策略。同时灵活的、基于接口的设计也开放的支持用户去自己实现更贴合自己业务的拒绝策略处理器。
+```java
+    /**
+    * 默认的拒绝策略：AbortPolicy
+    * */
+    private static final MyRejectedExecutionHandler defaultHandler = new MyAbortPolicy();
+    
+    /**
+     * 抛出RejectedExecutionException的拒绝策略
+     * 评价：能让提交任务的一方感知到异常的策略，比较通用，也是jdk默认的拒绝策略
+     * */
+    public static class MyAbortPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // 直接抛出异常
+            throw new RejectedExecutionException("Task " + command.toString() +
+                    " rejected from " + executor.toString());
+        }
+    }
+
+    /**
+     * 令调用者线程自己执行command任务的拒绝策略
+     * 评价：在线程池压力过大时，让提交任务的线程自己执行该任务（异步变同步），
+     *      能够有效地降低线程池的压力，也不会丢失任务，但可能导致整体业务吞吐量大幅降低
+     * */
+    public static class MyCallerRunsPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            if (!executor.isShutdown()) {
+                // 如果当前线程池不是shutdown状态，则令调用者线程自己执行command任务
+                command.run();
+            }else{
+                // 如果已经是shutdown状态了，就什么也不做直接丢弃任务
+            }
+        }
+    }
+
+    /**
+     * 直接丢弃任务的拒绝策略
+     * 评价：简单的直接丢弃任务，适用于对任务执行成功率要求不高的场合
+     * */
+    public static class MyDiscardPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            // 什么也不做的，直接返回
+            // 效果就是command任务被无声无息的丢弃了，没有异常
+        }
+    }
+
+    /**
+     * 丢弃当前工作队列中最早入队的任务，然后将当前任务重新提交
+     * 评价：适用于后出现的任务能够完全代替之前任务的场合(追求最终一致性)
+     * */
+    public static class MyDiscardOldestPolicy implements MyRejectedExecutionHandler {
+        @Override
+        public void rejectedExecution(Runnable command, MyThreadPoolExecutor executor) {
+            if (!executor.isShutdown()) {
+                // 如果当前线程池不是shutdown状态，则丢弃当前工作队列中最早入队的任务，然后将当前任务重新提交
+                executor.getQueue().poll();
+                executor.execute(command);
+            }else{
+                // 如果已经是shutdown状态了，就什么也不做直接丢弃任务
+            }
+        }
+    }
+```
+
+
 #### jdk默认的四种线程池实现（todo）
 #### 动态修改配置参数
 1. allowCoreThreadTimeOut

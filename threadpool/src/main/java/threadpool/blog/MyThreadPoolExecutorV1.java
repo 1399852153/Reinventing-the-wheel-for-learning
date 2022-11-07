@@ -806,7 +806,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     /**
      * 令调用者线程自己执行command任务的拒绝策略
      * 评价：在线程池压力过大时，让提交任务的线程自己执行该任务（异步变同步），
-     *      能够有效地降低线程池的压力，也不会出现任务丢失，但可能导致整体业务吞吐量大幅降低
+     *      能够有效地降低线程池的压力，也不会丢失任务，但可能导致整体业务吞吐量大幅降低
      * */
     public static class MyCallerRunsPolicy implements MyRejectedExecutionHandler {
         @Override
