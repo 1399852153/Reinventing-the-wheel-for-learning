@@ -959,7 +959,7 @@ jdk中除了提供了默认的拒绝策略，还在Executors类中提供了四�
 newFixedThreadPool方法创建一个工作线程数量固定的线程池，其创建ThreadPoolExecutor时传入的核心线程数corePoolSize和最大线程数maximumPoolSize是相等的。
 因此其工作队列传入是一个无界的LinkedBlockingQueue，无界的工作队列意味着永远都不会创建新的非核心线程。
 在默认allowCoreThreadTimeOut为false的情况下，线程池中的所有线程都是不会因为idle超时而销毁的核心线程。
-**适用场景：工作线程数量固定的“fixedThreadPool”适用于任务流量较为稳定的场景**
+**适用场景：由于工作线程数量固定，“fixedThreadPool”适用于任务流量较为稳定的场景**
 ```java
     public static ExecutorService newFixedThreadPool(int nThreads) {
         return new ThreadPoolExecutor(nThreads, nThreads,
@@ -968,7 +968,10 @@ newFixedThreadPool方法创建一个工作线程数量固定的线程池，其�
     }
 ```
 ##### newCachedThreadPool
-newCachedThreadPool方法创建一个工作线程数量不稳定的 todo
+newCachedThreadPool方法创建一个工作线程数量有巨大弹性的线程池，其核心线程数corePoolSize=0而最大线程数maximumPoolSize为Integer.MAX_VALUE，60s的保活时间。
+同时其工作队列是SynchronousQueue，是一种队列容量为0、无法缓存任何任务的阻塞队列(任何时候插入数据（offer）时必须有消费者线程消费，否则生产者线程将会被阻塞)。  
+这也意味着“cachedThreadPool”中没有核心线程，所有工作线程在任务负载较低时都会在60s的idle后被销毁；同时当负载较高，新任务到来时由于所有的工作线程都在执行其它任务，将会立即创建一个新的非核心线程来处理任务。  
+**适用场景：由于可以无限制的创建新线程来做到及时响应任务，“cachedThreadPool”适用于任务流量较大且不稳定，对任务延迟容忍度较低的场景**
 ```java
     public static ExecutorService newCachedThreadPool() {
         return new ThreadPoolExecutor(0, Integer.MAX_VALUE,
@@ -977,6 +980,9 @@ newCachedThreadPool方法创建一个工作线程数量不稳定的 todo
     }
 ```
 ##### newSingleThreadExecutor
+newSingleThreadExecutor方法创建一个单线程的线程池，其核心线程数corePoolSize=1且最大线程数maximumPoolSize也为1，其工作队列是无界队列。  
+这意味着“singleThreadExecutor”中任何提交的任务都将严格按照先入先出的顺序被执行。  
+**适用场景：“singleThreadExecutor”适用于任务量较小、对任务延迟容忍度较高、并要求任务顺序执行的场景。**
 ```java
     public static ExecutorService newSingleThreadExecutor() {
         return new FinalizableDelegatedExecutorService
@@ -986,10 +992,21 @@ newCachedThreadPool方法创建一个工作线程数量不稳定的 todo
     }
 ```
 ##### newScheduledThreadPool
+newScheduledThreadPool方法创建一个支持定时任务、延迟任务执行的线程池（关于jdk定时任务线程池ScheduledThreadPoolExecutor的工作原理会在未来的博客中展开）
+**适用场景：“scheduledThreadPool”适用于需要任务定时或者延迟执行的场景。**
 ```java
     public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize) {
         return new ScheduledThreadPoolExecutor(corePoolSize);
     }
-```
 
+    public ScheduledThreadPoolExecutor(int corePoolSize) {
+        super(corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS,
+        new DelayedWorkQueue());
+    }
+```
+##### jdk默认提供的线程池的弊端
+* 无论是newCachedThreadPool还是newFixedThreadPool、newSingleThreadExecutor，其设置的最大线程数量（Integer.MAX_VALUE）和无界的工作队列(new LinkedBlockingQueue<Runnable>())都缺乏必要的限制。
+  在生产环境中很容易因为任务流量过大导致创建过多的工作线程或令无界的工作队列堆积大量的任务对象而耗尽CPU和内存等系统资源，最终导致程序崩溃。  
+  这也是为什么阿里巴巴的开发规范中推荐使用更基础的ThreadPoolExecutor构造函数来创建所需要的线程池。  
+* **只有在了解ThreadPoolExecutor工作原理以及各项配置参数的具体作用后，才能根据具体的业务和硬件配置来设置最合适的参数值。**
 ### 总结
