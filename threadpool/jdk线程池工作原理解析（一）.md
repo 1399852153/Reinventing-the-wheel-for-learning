@@ -72,8 +72,8 @@ ThreadPoolExecutor中有许多的成员变量，大致可以分为三类。
 7. volatile boolean allowCoreThreadTimeOut（是否允许核心线程在idle超时后退出）
 #####
 其中前6个配置参数都可以在ThreadPoolExecutor的构造函数中指定，而allowCoreThreadTimeOut则可以通过暴露的public方法allowCoreThreadTimeOut来动态的设置。  
-而且其中大部分属性都是volatile修饰的，目的是让运行过程中可以用过提供的public方法动态修改这些值后，线程池中的活跃的工作线程或者提交任务的用户线程能及时的感知到变化（线程间的可见性），并进行响应（比如令核心线程自动的idle退出）  
-这些配置属性具体如何控制线程池行为的原理都会在下面的源码解析中展开介绍。理解这些参数的工作原理后才能在实际的业务中使用线程池时为其设置合理的值。
+**其中大部分属性都是volatile修饰的，目的是让运行过程中可以用过提供的public方法动态修改这些值后，线程池中的工作线程或提交任务的用户线程能及时的感知到变化（线程间的可见性），并进行响应（比如令核心线程自动的idle退出）**  
+这些配置属性具体如何控制线程池行为的原理都会在下面的源码解析中展开介绍。理解这些参数的工作原理后才能在实际的业务中使用线程池时为其设置合适的值。
 #### 仅供线程池内部工作时使用的属性
 1. ReentrantLock mainLock（用于控制各种临界区逻辑的并发）
 2. HashSet<Worker> workers（当前活跃工作线程Worker的集合，工作线程的工作原理会在下文介绍）
@@ -261,8 +261,8 @@ Worker内封装的实际的工作线程对象thread，其在构造函数中由�
 #####
 除此之外，Worker对象还继承了AbstractQueuedSynchronizer（AQS）类，简单的实现了一个不可重入的互斥锁。  
 对AQS互斥模式不太了解的读者可以参考一下我之前关于AQS互斥模式的博客：[AQS互斥模式与ReentrantLock可重入锁原理解析](https://www.cnblogs.com/xiaoxiongcanguan/p/14640699.html)  
-AQS中维护了一个int类型的state成员变量，其具体的含义由使用者自己赋予。
-在Worker类中，state可能有三种情况：
+AQS中维护了一个volatile修饰的int类型的成员变量state，其具体的含义可以由使用者自己定义。  
+在Worker中，state的值有三种状态： 
 1. state=-1，标识工作线程还未启动（不会被interruptIfStarted打断）
 2. state=0，标识工作线程已经启动，但没有开始处理任务(可能是在等待任务，idle状态)
 3. state=1，标识worker线程正在执行任务（runWorker方法中，成功获得任务后，通过lock方法将state设置为1）
@@ -519,7 +519,7 @@ addWorker可以分为两部分：判断当前是否满足创建新工作线程�
 * 如果Worker中的线程不是alive状态等原因导致工作线程启动失败，则在finally中通过addWorkerFailed进行一系列的回滚操作
 #####
 **虽然在前面线程池工作流程的分析中提到了核心线程与非核心线程的概念，但Worker类中实际上并没有核心/非核心的标识。
-在经过了工作线程启动前的条件判断后，新创建的工作线程实际上并没有真正的核心与非核心的差别。**
+经过了工作线程启动前的条件判断后，新创建的工作线程实际上并没有真正的核心与非核心的差别。**
 
 #### addWorkerFailed（addWorker的逆向回滚操作）
 addWorker中工作线程可能会启动失败，所以要对addWorker中对workers集合以及workerCount等数据的操作进行回滚。
@@ -559,7 +559,7 @@ addWorker中工作线程可能会启动失败，所以要对addWorker中对worke
 * 有两种情况会导致执行processWorkerExit，一种是上面说的任务执行时出现了异常，此时completedAbruptly=true；还有一种可能时getTask因为一些原因返回了null，此时completedAbruptly=false。
   completedAbruptly会作为processWorkerExit的参数传递。
 ```java
-/**
+   /**
      * worker工作线程主循环执行逻辑
      * */
     private void runWorker(MyWorker myWorker) {
@@ -788,8 +788,92 @@ runWorker中是通过getTask获取任务的，getTask中包含着工作线程是
         addWorker(null, false);
     }
 ```
+#### 动态修改配置参数
+ThreadPoolExecutor除了支持启动前通过构造函数设置配置参数外，也允许在线程池运行的过程中动态的更改配置。而要实现动态的修改配置，麻烦程度要比启动前静态的指定大得多。  
+举个例子，在线程池的运行过程中如果当前corePoolSize=20，且已经创建了20个核心线程时（workerCount=20），现在将corePoolSize减少为10或者增大为30时应该如何实时的生效呢？  
+下面通过内嵌于代码中的注释，详细的说明了**allowCoreThreadTimeOut**、**corePoolSize**、**maximumPoolSize**这三个关键配置参数实现动态修改的原理。
+```java
+   /**
+     * 设置是否允许核心线程idle超时后退出
+     * */
+    public void allowCoreThreadTimeOut(boolean value) {
+        if (value && keepAliveTime <= 0) {
+            throw new IllegalArgumentException("Core threads must have nonzero keep alive times");
+        }
+        // 判断一下新旧值是否相等，避免无意义的volatile变量更新，导致不必要的cpu cache同步
+        if (value != allowCoreThreadTimeOut) {
+            allowCoreThreadTimeOut = value;
+            if (value) {
+                // 参数值value为true，说明之前不允许核心线程由于idle超时而退出
+                // 而此时更新为true说明现在允许了，则通过interruptIdleWorkers唤醒所有的idle线程
+                // 令其走一遍runWorker中的逻辑，尝试着让idle超时的核心线程及时销毁
+                interruptIdleWorkers();
+            }
+        }
+    }
+
+    /**
+     * 动态更新核心线程最大值corePoolSize
+     * */
+    public void setCorePoolSize(int corePoolSize) {
+        if (corePoolSize < 0) {
+            throw new IllegalArgumentException();
+        }
+
+        // 计算差异
+        int delta = corePoolSize - this.corePoolSize;
+        // 赋值
+        this.corePoolSize = corePoolSize;
+        if (workerCountOf(this.ctl.get()) > corePoolSize) {
+            // 更新完毕后，发现当前工作线程数超过了指定的值
+            // 唤醒所有idle线程，让目前空闲的idle超时的线程在workerCount大于maximumPoolSize时及时销毁
+            interruptIdleWorkers();
+        } else if (delta > 0) {
+            // 差异大于0，代表着新值大于旧值
+
+            // We don't really know how many new threads are "needed".
+            // As a heuristic, prestart enough new workers (up to new
+            // core size) to handle the current number of tasks in
+            // queue, but stop if queue becomes empty while doing so.
+            // 我们无法确切的知道有多少新的线程是所需要的。
+            // 启发式的预先启动足够的新工作线程用于处理工作队列中的任务
+            // 但当执行此操作时工作队列为空了，则立即停止此操作（队列为空了说明当前负载较低，再创建更多的工作线程是浪费资源）
+
+            // 取差异和当前工作队列中的最小值为k
+            int k = Math.min(delta, workQueue.size());
+
+            // 尝试着一直增加新的工作线程，直到和k相同
+            // 这样设计的目的在于控制增加的核心线程数量，不要一下子创建过多核心线程
+            // 举个例子：原来的corePoolSize是10，且工作线程数也是10，现在新值设置为了30，新值比旧值大20，理论上应该直接创建20个核心工作线程
+            // 而工作队列中的任务数只有10，那么这个时候直接创建20个新工作线程是没必要的，只需要一个一个创建，在创建的过程中新的线程会尽量的消费工作队列中的任务
+            // 这样就可以以一种启发性的方式创建合适的新工作线程，一定程度上节约资源。后面再有新的任务提交时，再从runWorker方法中去单独创建核心线程(类似惰性创建)
+            while (k-- > 0 && addWorker(null, true)) {
+                if (workQueue.isEmpty()) {
+                    // 其它工作线程在循环的过程中也在消费工作线程，且用户也可能不断地提交任务
+                    // 这是一个动态的过程，但一旦发现当前工作队列为空则立即结束
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * 动态更新最大线程数maximumPoolSize
+     * */
+    public void setMaximumPoolSize(int maximumPoolSize) {
+        if (maximumPoolSize <= 0 || maximumPoolSize < corePoolSize) {
+            throw new IllegalArgumentException();
+        }
+        this.maximumPoolSize = maximumPoolSize;
+        if (workerCountOf(this.ctl.get())  > maximumPoolSize) {
+            // 更新完毕后，发现当前工作线程数超过了指定的值
+            // 唤醒所有idle线程，让目前空闲的idle超时的线程在workerCount大于maximumPoolSize时及时销毁
+            interruptIdleWorkers();
+        }
+    }
+```
 #####
-借助v1版本的MyThreadPoolExecutor源码，已经将jdk的线程池ThreadPoolExecutor在RUNNING状态下提交任务，启动工作线程执行任务等核心逻辑介绍完毕了（不考虑优雅停止）。
+目前为止，通过v1版本的MyThreadPoolExecutor源码，已经将jdk线程池ThreadPoolExecutor在RUNNING状态下提交任务，启动工作线程执行任务相关的核心逻辑讲解完毕了（不考虑优雅停止）。
 #### jdk线程池默认支持的四种拒绝策略
 jdk线程池支持用户传入自定义的拒绝策略处理器，只需要传入实现了RejectedExecutionHandler接口的对象就行。  
 而jdk在ThreadPoolExecutor中提供了默认的四种拒绝策略方便用户使用。
@@ -868,12 +952,44 @@ jdk线程池支持用户传入自定义的拒绝策略处理器，只需要传�
         }
     }
 ```
-
-
-#### jdk默认的四种线程池实现（todo）
-#### 动态修改配置参数
-1. allowCoreThreadTimeOut
-2. setCorePoolSize
-3. setMaximumPoolSize
+#### jdk默认的四种线程池实现
+jdk中除了提供了默认的拒绝策略，还在Executors类中提供了四种基于ThreadPoolExecutor的、比较常用的线程池，以简化用户对线程池的使用。
+这四种线程池可以通过Executors提供的public方法来分别创建：
+##### newFixedThreadPool
+newFixedThreadPool方法创建一个工作线程数量固定的线程池，其创建ThreadPoolExecutor时传入的核心线程数corePoolSize和最大线程数maximumPoolSize是相等的。
+因此其工作队列传入是一个无界的LinkedBlockingQueue，无界的工作队列意味着永远都不会创建新的非核心线程。
+在默认allowCoreThreadTimeOut为false的情况下，线程池中的所有线程都是不会因为idle超时而销毁的核心线程。
+**适用场景：工作线程数量固定的“fixedThreadPool”适用于任务流量较为稳定的场景**
+```java
+    public static ExecutorService newFixedThreadPool(int nThreads) {
+        return new ThreadPoolExecutor(nThreads, nThreads,
+                                      0L, TimeUnit.MILLISECONDS,
+                                      new LinkedBlockingQueue<Runnable>());
+    }
+```
+##### newCachedThreadPool
+newCachedThreadPool方法创建一个工作线程数量不稳定的 todo
+```java
+    public static ExecutorService newCachedThreadPool() {
+        return new ThreadPoolExecutor(0, Integer.MAX_VALUE,
+                                      60L, TimeUnit.SECONDS,
+                                      new SynchronousQueue<Runnable>());
+    }
+```
+##### newSingleThreadExecutor
+```java
+    public static ExecutorService newSingleThreadExecutor() {
+        return new FinalizableDelegatedExecutorService
+            (new ThreadPoolExecutor(1, 1,
+                                    0L, TimeUnit.MILLISECONDS,
+                                    new LinkedBlockingQueue<Runnable>()));
+    }
+```
+##### newScheduledThreadPool
+```java
+    public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize) {
+        return new ScheduledThreadPoolExecutor(corePoolSize);
+    }
+```
 
 ### 总结

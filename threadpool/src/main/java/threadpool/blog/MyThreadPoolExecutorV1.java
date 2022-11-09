@@ -277,7 +277,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         this.corePoolSize = corePoolSize;
         if (workerCountOf(this.ctl.get()) > corePoolSize) {
             // 更新完毕后，发现当前工作线程数超过了指定的值
-            // 唤醒所有idle线程，让目前空闲的idle超时的线程及时销毁
+            // 唤醒所有idle线程，让目前空闲的idle超时的线程在workerCount大于maximumPoolSize时及时销毁
             interruptIdleWorkers();
         } else if (delta > 0) {
             // 差异大于0，代表着新值大于旧值
@@ -287,8 +287,8 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
             // core size) to handle the current number of tasks in
             // queue, but stop if queue becomes empty while doing so.
             // 我们无法确切的知道有多少新的线程是所需要的。
-            // 以启发式的，预先启动足够的新工作线程，用于处理工作队列中的任务
-            // 但当执行此操作时工作队列为空了，则立即停止此操作
+            // 启发式的，预先启动足够的新工作线程，用于处理工作队列中的任务
+            // 但当执行此操作时工作队列为空了，则立即停止此操作（队列为空了说明当前负载较低，再创建更多的工作线程是浪费资源）
 
             // 取差异和当前工作队列中的最小值为k
             int k = Math.min(delta, workQueue.size());
@@ -318,7 +318,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         this.maximumPoolSize = maximumPoolSize;
         if (workerCountOf(this.ctl.get())  > maximumPoolSize) {
             // 更新完毕后，发现当前工作线程数超过了指定的值
-            // 唤醒所有idle线程，让目前空闲的idle超时的线程及时销毁
+            // 唤醒所有idle线程，让目前空闲的idle超时的线程在workerCount大于maximumPoolSize时及时销毁
             interruptIdleWorkers();
         }
     }
