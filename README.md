@@ -11,3 +11,5 @@
 [自己动手实现AQS（一） AQS互斥模式与ReentrantLock可重入锁原理解析](https://www.cnblogs.com/xiaoxiongcanguan/p/15158618.html)
 
 ## 自己动手实现线程池（todo）
+博客地址：
+[jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一）](https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html)
