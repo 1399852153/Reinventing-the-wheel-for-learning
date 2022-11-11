@@ -734,6 +734,10 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         volatile long completedTasks;
 
         public MyWorker(Runnable firstTask) {
+            // Worker初始化时，state设置为-1，用于interruptIfStarted方法中作为过滤条件，避免还未开始启动的Worker响应中断
+            // 在runWorker方法中会通过一次unlock将state修改为0
+            setState(-1);
+
             this.firstTask = firstTask;
 
             // newThread可能是null
