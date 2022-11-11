@@ -170,6 +170,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
     /**
      * 提交任务，并执行
      * */
+    @Override
     public void execute(Runnable command) {
         if (command == null){
             throw new NullPointerException("command参数不能为空");
@@ -226,6 +227,7 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         return ftask;
     }
 
+    @Override
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
         // 当一个任务从工作队列中被成功移除，可能此时工作队列为空。尝试判断是否满足线程池中止条件
@@ -323,6 +325,9 @@ public class MyThreadPoolExecutorV1 implements MyThreadPoolExecutor{
         }
     }
 
+    /**
+     * 获得当前线程池的工作线程个数
+     * */
     public int getPoolSize() {
         final ReentrantLock mainLock = this.mainLock;
         mainLock.lock();
