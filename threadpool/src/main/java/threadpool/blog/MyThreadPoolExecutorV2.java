@@ -124,10 +124,16 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
      * 当前线程池状态为TIDYING，调用的钩子函数terminated已返回
      * 对应逻辑：tryTerminate方法中的ctl.set(ctlOf(TERMINATED, 0));
      * */
+
+    //  11100000 00000000 00000000 00000000
     private static final int RUNNING = -1 << COUNT_BITS;
+    //  00000000 00000000 00000000 00000000
     private static final int SHUTDOWN = 0 << COUNT_BITS;
+    //  00100000 00000000 00000000 00000000
     private static final int STOP = 1 << COUNT_BITS;
+    //  01000000 00000000 00000000 00000000
     private static final int TIDYING = 2 << COUNT_BITS;
+    //  01100000 00000000 00000000 00000000
     private static final int TERMINATED = 3 << COUNT_BITS;
 
     // Packing and unpacking ctl
