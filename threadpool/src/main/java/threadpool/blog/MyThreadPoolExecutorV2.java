@@ -411,6 +411,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         } finally {
             mainLock.unlock();
         }
+
+        // 尝试终止线程池
         tryTerminate();
     }
 
@@ -437,6 +439,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         } finally {
             mainLock.unlock();
         }
+
+        // 尝试终止线程池
         tryTerminate();
         return tasks;
     }
@@ -991,6 +995,9 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         }
     }
 
+    /**
+     * 推进线程池工作状态
+     * */
     private void advanceRunState(int targetState) {
         for(;;){
             // 获得当前的线程池状态
@@ -1109,7 +1116,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 
     /**
      * 单独为jdk的ScheduledThreadPoolExecutor开的一个钩子函数
-     * 由ScheduledThreadPoolExecutor继承ThreadExecutor时重写
+     * 由ScheduledThreadPoolExecutor继承ThreadExecutor时重写（包级别访问权限）
      * */
     void onShutdown() {
     }

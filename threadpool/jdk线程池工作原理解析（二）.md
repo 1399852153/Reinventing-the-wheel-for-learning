@@ -96,25 +96,244 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     private static boolean isRunning(int c) {
         return c < SHUTDOWN;
     }
+
+    /**
+     * 推进线程池工作状态
+     * */
+    private void advanceRunState(int targetState) {
+        for(;;){
+            // 获得当前的线程池状态
+            int currentCtl = this.ctl.get();
+
+            // 1 （runState >= targetState）如果当前线程池状态不比传入的targetState小
+            // 代表当前状态已经比参数要制定的更加快(或者至少已经处于对应阶段了)，则无需更新poolStatus的状态(或语句中第一个条件为false，直接break了)
+            // 2  (this.ctl.compareAndSet)，cas的将runState更新为targetState
+            // 如果返回true则说明cas更新成功直接break结束（或语句中第一个条件为false，第二个条件为true）
+            // 如果返回false说明cas争抢失败，再次进入while循环重试（或语句中第一个和第二个条件都是false，不break而是继续执行循环重试）
+            if (runStateAtLeast(currentCtl, targetState) ||
+                    this.ctl.compareAndSet(
+                            currentCtl,
+                            ctlOf(targetState, workerCountOf(currentCtl)
+                            ))) {
+                break;
+            }
+        }
+    }
 }    
 ```
 因为线程池状态不是单独存放，而是放在ctl这一32位数据的高3位的，读写都比较麻烦，因此提供了runStateOf和ctlOf方法（位运算）来简化操作。  
-线程池的状态是单调递推的，由于巧妙的设置了状态靠前的值会更小，因此可以直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning）。
+线程池的状态是单调递推的，由于巧妙的设置了状态靠前的值会更小，因此可以直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning、advanceRunState）。
 ## jdk线程池ThreadPoolExecutor优雅停止具体实现原理
 线程池的优雅停止一般要能做到以下几点：
 1. 线程池在中止后不能再受理新的任务
 2. 线程池中止的过程中，已经提交的现存任务不能丢失（等待剩余任务执行完再关闭或者能够把剩余的任务吐出来还给用户）
 3. 线程池最终关闭前，确保创建的所有工作线程都已退出，不会出现资源的泄露
-
+下面我们从源码层面解析ThreadPoolExecutor，看看其是如何实现上述这三点的.
 ### 如何中止线程池(shutdown shutdownNow)
+ThreadPoolExecutor线程池提供了shutdown和shutdownNow这两个public方法给使用者用于发起线程池的停止指令。
+##### shutdown方法
+shutdown方法用于关闭线程池，并令线程池从RUNNING状态转变位SHUTDOWN状态。位于SHUTDOWN状态的线程池，不再接收新任务，但已提交的任务会全部被执行完。
+```java
+    /**
+     * 关闭线程池（不再接收新任务，但已提交的任务会全部被执行）
+     * 但不会等待任务彻底的执行完成（awaitTermination）
+     */
+    public void shutdown() {
+        final ReentrantLock mainLock = this.mainLock;
 
-### 如何保证线程池在中止后不能再受理新的任务
+        // shutdown操作中涉及大量的资源访问和更新，直接通过互斥锁防并发
+        mainLock.lock();
+        try {
+            // 用于shutdown/shutdownNow时的安全访问权限
+            checkShutdownAccess();
+            // 将线程池状态从RUNNING推进到SHUTDOWN
+            advanceRunState(SHUTDOWN);
+            // shutdown不会立即停止所有线程，而仅仅先中断idle状态的多余线程进行回收，还在执行任务的线程就慢慢等其执行完
+            interruptIdleWorkers();
+            // 单独为ScheduledThreadPoolExecutor开的一个钩子函数（hook for ScheduledThreadPoolExecutor）
+            onShutdown();
+        } finally {
+            mainLock.unlock();
+        }
 
-### 如何保证中止过程中不丢失已提交的任务
+        // 尝试终止线程池
+        tryTerminate();
+    }
+
+    /**
+     * 用于shutdown/shutdownNow时的安全访问权限
+     * 检查当前调用者是否有权限去通过interrupt方法去中断对应工作线程
+     * */
+    private void checkShutdownAccess() {
+        // 判断jvm启动时是否设置了安全管理器SecurityManager
+        SecurityManager security = System.getSecurityManager();
+        // 如果没有设置，直接返回无事发生
+
+        if (security != null) {
+            // 设置了权限管理器，验证当前调用者是否有modifyThread的权限
+            // 如果没有，checkPermission会抛出SecurityException异常
+            security.checkPermission(shutdownPerm);
+    
+            // 通过上述校验，检查工作线程是否能够被调用者访问
+            final ReentrantLock mainLock = this.mainLock;
+            mainLock.lock();
+            try {
+                for (MyWorker w : workers) {
+                    // 检查每一个工作线程中的thread对象是否有权限被调用者访问
+                    security.checkAccess(w.thread);
+                }
+            } finally {
+                mainLock.unlock();
+            }
+        }
+    }
+
+    /**
+     * 中断所有处于idle状态的线程
+     * */
+    private void interruptIdleWorkers() {
+        // 默认打断所有idle状态的工作线程
+        interruptIdleWorkers(false);
+    }
+
+    private static final boolean ONLY_ONE = true;
+
+    /**
+     * 中断处于idle状态的线程
+     * @param onlyOne 如果为ture，至多只中断一个工作线程(可能一个都不中断)
+     *                如果为false，中断workers内注册的所有工作线程
+     * */
+    private void interruptIdleWorkers(boolean onlyOne) {
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            for (MyWorker w : workers) {
+                Thread t = w.thread;
+                // 1. t.isInterrupted()，说明当前线程存在中断信号，之前已经被中断了，无需再次中断
+                // 2. w.tryLock(), runWorker方法中如果工作线程获取到任务开始工作，会先进行Lock加锁
+                // 则这里的tryLock会加锁失败，返回false。 而返回true的话，就说明当前工作线程是一个idle线程，需要被中断
+                if (!t.isInterrupted() && w.tryLock()) {
+                    try {
+                        t.interrupt();
+                    } catch (SecurityException ignore) {
+                    } finally {
+                        // tryLock成功时，会将内部state的值设置为1，通过unlock恢复到未加锁的状态
+                        w.unlock();
+                    }
+                }
+                if (onlyOne) {
+                    // 参数onlyOne为true，至多只中断一个工作线程
+                    // 即使上面的t.interrupt()没有执行，也在这里跳出循环
+                    break;
+                }
+            }
+        } finally {
+            mainLock.unlock();
+        }
+    }
+    
+    /**
+     * 单独为jdk的ScheduledThreadPoolExecutor开的一个钩子函数
+     * 由ScheduledThreadPoolExecutor继承ThreadExecutor时重写（包级别访问权限）
+     * */
+    void onShutdown() {}
+```
+#####
+1. shutdown方法在入口处使用mainLock加锁后，通过checkShutdownAccess检查当前是否有权限访问工作线程（前提是设置了SecurityManager），如果无权限则会抛出SecurityException异常。
+2. 通过advanceRunState方法将线程池状态推进到SHUTDOWN。
+3. 通过interruptIdleWorkers使用中断指令（Thread.interrupt）唤醒所有处于idle状态的工作线程（存在idle状态的工作线程代表着当前工作队列是空的）。 
+   idle的工作线程在被唤醒后从getTask方法中退出（getTask中对应的退出逻辑在下文中展开），进而退出runWorker方法，最终系统回收掉工作线程占用的各种资源（第一篇博客中runWorker的解析中提到过）。
+4. 调用包级别修饰的钩子函数onShutdown。这一方法是作者专门为同为java.util.concurrent包下的ScheduledThreadPoolExecutor提供的拓展。具体原理不再本篇博客中展开。
+5. 前面提到SHUTDOWN状态的线程池在工作线程都全部退出且工作队列为空时会转变为TIDYING状态，因此通过调用tryTerminate方法**尝试**终止线程池（当前不一定会满足条件，比如调用了shutdown但工作队列还有很多任务等待执行）。
+   tryTerminate方法中细节比较多，下文中再展开分析。
+##### shutdownNow方法
+shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进。shutdownNow方法令线程池从RUNNING状态转变为STOP状态，不再接收新任务，工作队列中未完成的任务会以列表的形式返回。  
+* shutdown方法在调用后，虽然不再接受新任务，但会等待工作队列中的队列被慢慢消费掉；而shutdownNow并不会等待，而是会将当前工作队列中的所有未被捞取的剩余任务全部返回给shutdownNow的调用者，并将所有的工作线程(包括非idle的线程)都打断。  
+* 这样做的好处是线程池可以更快的进入终止态，而不必等所有的剩余任务完成，且返回给用户后也不会丢任务。
+```java
+    /**
+     * 立即关闭线程池（不再接收新任务，工作队列中未完成的任务会以列表的形式返回）
+     * @return 当前工作队列中未完成的任务
+     * */
+    public List<Runnable> shutdownNow() {
+        List<Runnable> tasks;
+
+        final ReentrantLock mainLock = this.mainLock;
+
+        // shutdown操作中涉及大量的资源访问和更新，直接通过互斥锁防并发
+        mainLock.lock();
+        try {
+            // 用于shutdown/shutdownNow时的安全访问权限
+            checkShutdownAccess();
+            // 将线程池状态从RUNNING推进到STOP
+            advanceRunState(STOP);
+            interruptWorkers();
+
+            // 将工作队列中未完成的任务提取出来(会清空线程池的workQueue)
+            tasks = drainQueue();
+        } finally {
+            mainLock.unlock();
+        }
+
+        // 尝试终止线程池
+        tryTerminate();
+        return tasks;
+    }
+
+   /**
+    * shutdownNow方法内，立即终止线程池时该方法被调用
+    * 中断通知所有已经启动的工作线程（比如等待在工作队列上的idle工作线程，或者run方法内部await、sleep等，令其抛出中断异常快速结束）
+    * */
+    private void interruptWorkers() {
+        final ReentrantLock mainLock = this.mainLock;
+        mainLock.lock();
+        try {
+            for (MyWorker w : workers) {
+              // 遍历所有的worker线程，已启动的工作线程全部调用Thread.interrupt方法，发出中断信号
+              w.interruptIfStarted();
+            }
+        } finally {
+            mainLock.unlock();
+        }
+    }
+
+   /**
+    * 将工作队列中的任务全部转移出来
+    * 用于shutdownNow紧急关闭线程池时将未完成的任务返回给调用者，避免任务丢失
+    * */
+   private List<Runnable> drainQueue() {
+        BlockingQueue<Runnable> queue = this.workQueue;
+        ArrayList<Runnable> taskList = new ArrayList<>();
+        queue.drainTo(taskList);
+        // 通常情况下，普通的阻塞队列的drainTo方法可以一次性的把所有元素都转移到taskList中
+        // 但jdk的DelayedQueue或者一些自定义的阻塞队列，drainTo方法无法转移所有的元素
+        // （比如DelayedQueue的drainTo方法只能转移已经不需要延迟的元素，即getDelay()<=0）
+        if (!queue.isEmpty()) {
+           // 所以在这里打一个补丁逻辑：如果drainTo方法执行后工作队列依然不为空，则通过更基础的remove方法把队列中剩余元素一个一个的循环放到taskList中
+           for (Runnable r : queue.toArray(new Runnable[0])) {
+              if (queue.remove(r)) {
+                taskList.add(r);
+              }
+           }
+        }
+        
+        return taskList;
+   }    
+```
+#####
+1. shutdownNow方法在入口处使用mainLock加锁后，与shutdown方法一样也通过checkShutdownAccess检查当前是否有权限访问工作线程（前提是设置了SecurityManager），如果无权限则会抛出SecurityException异常。
+2. 通过advanceRunState方法将线程池状态推进到STOP。
+3. 通过interruptWorkers使用中断指令（Thread.interrupt）唤醒所有工作线程（区别于shutdown中的interruptIdleWorkers）。区别在于除了idle的工作线程，所有正在执行任务的工作线程也会收到中断通知，**期望**其能尽快退出任务的执行。
+4. 通过drainQueue方法将当前工作线程中剩余的所有任务以List的形式统一返回给调用者。
+5. 通过调用tryTerminate方法**尝试**终止线程池。
+### 如何保证线程池在中止后不能再受理新的任务？
+
+### 如何保证中止过程中不丢失已提交的任务？
 1. 等待剩余任务执行完再关闭
 2. 把剩余的任务吐出来还给用户
 
-### 如何保证线程池最终关闭前，所有工作线程都已退出
+### 如何保证线程池最终关闭前，所有工作线程都已退出？
+##### 如何保证工作线程一定会退出？
 
 ## 总结
 
