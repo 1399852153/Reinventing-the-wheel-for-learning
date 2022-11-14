@@ -282,6 +282,9 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         return ftask;
     }
 
+    /**
+     * 从工作队列中移除对应任务
+     * */
     @Override
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
