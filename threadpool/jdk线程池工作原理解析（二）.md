@@ -336,7 +336,15 @@ shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进�
   保证了不是RUNNING状态的线程池（runState >= SHUTDOWN），无法创建新的工作线程（addWorker返回false）。  
   **但有一种特殊情况**：即SHUTDOWN状态下(runState == SHUTDOWN)，工作队列不为空(!workQueue.isEmpty())，且不是第一次提交任务时创建新工作线程（firstTask == null），  
   依然允许创建新的工作线程，因为即使在SHUTDOWN状态下，某一存活的工作线程发生中断异常时，会调用processWorkerExit方法，在销毁原有工作线程后依然需要调用addWorker重新创建一个新的（firstTask == null）
-* todo cas更新ctl防并发
+##### execute与shutdown/shutdownNow并发时的处理
+execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并发执行的，但addWorker中有多处地方都对线程池的状态进行了检查，尽最大的可能避免线程池停止时并发的创建新的工作线程。
+1. retry循环中，compareAndIncrementWorkerCount方法会cas的更新状态（此前获取到的ctl状态必然是RUNNING，否则走不到这里），cas成功则会跳出retry:循环（ break retry;）。 
+   而cas失败可能有两种情况： 
+   如果是workerCount发生了并发的变化，则在内层的for (;;)循环中进行重试即可  
+   如果线程池由于收到终止指令而推进了状态，则随后的if (runStateOf(currentCtl) != runState)将会为true，跳出到外层的循环重试（continue retry）  
+2. 在new Worker(firstTask)后，使用mainLock获取锁后再一次检查线程池状态（if (runState < SHUTDOWN ||(runState == SHUTDOWN && firstTask == null))）。  
+   由于shutdown、shutdownNow也是通过mainLock加锁后才推进的线程池状态，因此这里的获取到的状态是准确的。
+   如果校验失败（if结果为false），则workers中不会加入新创建的工作线程，临时变量workerAdded=false，则工作线程不会启动（t.start()）。临时变量workerStarted也为false，最后会调用addWorkerFailed将新创建的工作线程给回收（回滚）
 ```java
 /**
      * 提交任务，并执行
