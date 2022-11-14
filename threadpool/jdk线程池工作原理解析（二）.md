@@ -129,7 +129,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 2. 线程池中止的过程中，已经提交的现存任务不能丢失（等待剩余任务执行完再关闭或者能够把剩余的任务吐出来还给用户）
 3. 线程池最终关闭前，确保创建的所有工作线程都已退出，不会出现资源的泄露
 下面我们从源码层面解析ThreadPoolExecutor，看看其是如何实现上述这三点的.
-### 如何中止线程池(shutdown shutdownNow)
+### 如何中止线程池
 ThreadPoolExecutor线程池提供了shutdown和shutdownNow这两个public方法给使用者用于发起线程池的停止指令。
 ##### shutdown方法
 shutdown方法用于关闭线程池，并令线程池从RUNNING状态转变位SHUTDOWN状态。位于SHUTDOWN状态的线程池，不再接收新任务，但已提交的任务会全部被执行完。
@@ -327,7 +327,211 @@ shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进�
 4. 通过drainQueue方法将当前工作线程中剩余的所有任务以List的形式统一返回给调用者。
 5. 通过调用tryTerminate方法**尝试**终止线程池。
 ### 如何保证线程池在中止后不能再受理新的任务？
+在execute方法作为入口，提交任务的逻辑中，v2版本（和jdk实现基本一致）相比v1版本新增了一些基于线程池状态的校验。
+##### execute方法中的校验
+* 首先在最外层的execute方法中，在向工作队列中加入新任务前（workQueue.offer）对当前线程池的状态做了一个校验（isRunning(currentCtl)）。  
+  这保证了不是RUNNING状态的线程池，无法向工作队列中添加新任务
+##### addWorker方法中的校验
+* 在addWorker方法的入口处(retry:第一层循环通过(runState >= SHUTDOWN && !(runState == SHUTDOWN && firstTask == null && !workQueue.isEmpty())))逻辑，
+  保证了不是RUNNING状态的线程池（runState >= SHUTDOWN），无法创建新的工作线程（addWorker返回false）。  
+  **但有一种特殊情况**：即SHUTDOWN状态下(runState == SHUTDOWN)，工作队列不为空(!workQueue.isEmpty())，且不是第一次提交任务时创建新工作线程（firstTask == null），  
+  依然允许创建新的工作线程，因为即使在SHUTDOWN状态下，某一存活的工作线程发生中断异常时，会调用processWorkerExit方法，在销毁原有工作线程后依然需要调用addWorker重新创建一个新的（firstTask == null）
+* todo cas更新ctl防并发
+```java
+/**
+     * 提交任务，并执行
+     * */
+    @Override
+    public void execute(Runnable command) {
+        if (command == null){
+            throw new NullPointerException("command参数不能为空");
+        }
 
+        int currentCtl = this.ctl.get();
+        if (workerCountOf(currentCtl) < this.corePoolSize) {
+            // 如果当前存在的worker线程数量低于指定的核心线程数量，则创建新的核心线程
+            boolean addCoreWorkerSuccess = addWorker(command,true);
+            if(addCoreWorkerSuccess){
+                // addWorker添加成功，直接返回即可
+                return;
+            }
+
+            // addWorker失败了
+            // 失败的原因主要有以下几个：
+            // 1 线程池的状态出现了变化，比如调用了shutdown/shutdownNow方法，不再是RUNNING状态，停止接受新的任务
+            // 2 多个线程并发的execute提交任务，导致cas失败，重试后发现当前线程的个数已经超过了限制
+            // 3 小概率是ThreadFactory线程工厂没有正确的返回一个Thread
+
+            // 获取最新的ctl状态
+            currentCtl = this.ctl.get();
+        }
+
+        // 走到这里有两种情况
+        // 1 因为核心线程超过限制（workerCountOf(currentCtl) < corePoolSize == false），需要尝试尝试将任务放入阻塞队列
+        // 2 addWorker返回false，创建核心工作线程失败
+
+        // 判断当前线程池状态是否为running
+        // 如果是running状态，则进一步执行任务入队操作
+        if(isRunning(currentCtl) && this.workQueue.offer(command)){
+            // 线程池是running状态，且workQueue.offer入队成功
+
+            int recheck = this.ctl.get();
+            // 重新检查状态，避免在上面入队的过程中线程池并发的关闭了
+            // 如果是isRunning=false，则进一步需要通过remove操作将刚才入队的任务删除，进行回滚
+            if (!isRunning(recheck) && remove(command)) {
+                // 线程池关闭了，执行reject操作
+                reject(command);
+            } else if(workerCountOf(currentCtl) == 0){
+                // 在corePoolSize为0的情况下，当前不存在存活的核心线程
+                // 一个任务在入队之后，如果当前线程池中一个线程都没有，则需要兜底的创建一个非核心线程来处理入队的任务
+                // 因此firstTask为null，目的是先让任务先入队后创建线程去拉取任务并执行
+                addWorker(null,false);
+            }else{
+                // 加入队列成功，且当前存在worker线程，成功返回
+                return;
+            }
+        }else{
+            // 阻塞队列已满，尝试创建一个新的非核心线程处理
+            boolean addNonCoreWorkerSuccess = addWorker(command,false);
+            if(!addNonCoreWorkerSuccess){
+                // 创建非核心线程失败，执行拒绝策略（失败的原因和前面创建核心线程addWorker的原因类似）
+                reject(command);
+            }else{
+                // 创建非核心线程成功，成功返回
+                return;
+            }
+        }
+    }
+```
+```java
+/**
+     * 向线程池中加入worker
+     * */
+    private boolean addWorker(Runnable firstTask, boolean core) {
+        // retry标识外层循环
+        retry:
+        for (;;) {
+            int currentCtl = ctl.get();
+            int runState = runStateOf(currentCtl);
+
+            // Check if queue empty only if necessary.
+            // 线程池终止时需要返回false,避免新的worker被创建
+            // 1 先判断runState >= SHUTDOWN
+            // 2 runState >= SHUTDOWN时，意味着不再允许创建新的工作线程，但有一种情况例外
+            // 即SHUTDOWN状态下(runState == SHUTDOWN)，工作队列不为空(!workQueue.isEmpty())，还需要继续执行
+            // 比如在当前存活的线程发生中断异常时，会调用processWorkerExit方法，在销毁原有工作线程后调用addWorker重新创建一个新的（firstTask == null）
+            if (runState >= SHUTDOWN && !(runState == SHUTDOWN && firstTask == null && !workQueue.isEmpty())) {
+                // 线程池已经是关闭状态了，不再允许创建新的工作线程，返回false
+                return false;
+            }
+
+            // 用于cas更新workerCount的内层循环（注意这里面与jdk的写法不同，改写成了逻辑一致但更可读的形式）
+            for (;;) {
+                // 判断当前worker数量是否超过了限制
+                int workerCount = workerCountOf(currentCtl);
+                if (workerCount >= CAPACITY) {
+                    // 当前worker数量超过了设计上允许的最大限制
+                    return false;
+                }
+                if (core) {
+                    // 创建的是核心线程，判断当前线程数是否已经超过了指定的核心线程数
+                    if (workerCount >= this.corePoolSize) {
+                        // 超过了核心线程数，创建核心worker线程失败
+                        return false;
+                    }
+                } else {
+                    // 创建的是非核心线程，判断当前线程数是否已经超过了指定的最大线程数
+                    if (workerCount >= this.maximumPoolSize) {
+                        // 超过了最大线程数，创建非核心worker线程失败
+                        return false;
+                    }
+                }
+
+                // cas更新workerCount的值
+                boolean casSuccess = compareAndIncrementWorkerCount(currentCtl);
+                if (casSuccess) {
+                    // cas成功，跳出外层循环
+                    break retry;
+                }
+
+                // 重新检查一下当前线程池的状态与之前是否一致
+                currentCtl = ctl.get();  // Re-read ctl
+                if (runStateOf(currentCtl) != runState) {
+                    // 从外层循环开始continue（因为说明在这期间 线程池的工作状态出现了变化，需要重新判断）
+                    continue retry;
+                }
+
+                // compareAndIncrementWorkerCount方法cas争抢失败，重新执行内层循环
+            }
+        }
+
+        boolean workerStarted = false;
+        boolean workerAdded = false;
+
+        MyWorker newWorker = null;
+        try {
+            // 创建一个新的worker
+            newWorker = new MyWorker(firstTask);
+            final Thread myWorkerThread = newWorker.thread;
+            if (myWorkerThread != null) {
+                // MyWorker初始化时内部线程创建成功
+
+                // 加锁，防止并发更新
+                final ReentrantLock mainLock = this.mainLock;
+                mainLock.lock();
+
+                try {
+                    // Recheck while holding lock.
+                    // Back out on ThreadFactory failure or if
+                    // shut down before lock acquired.
+                    int runState = runStateOf(ctl.get());
+
+                    // 重新检查线程池运行状态，满足以下两个条件的任意一个才创建新Worker
+                    // 1 runState < SHUTDOWN
+                    // 说明线程池处于RUNNING状态正常运行，可以创建新的工作线程
+                    // 2 runState == SHUTDOWN && firstTask == null
+                    // 说明线程池调用了shutdown，但工作队列不为空，依然需要新的Worker。
+                    // firstTask == null标识着其不是因为外部提交新任务而创建新Worker，而是在消费SHUTDOWN前已提交的任务
+                    if (runState < SHUTDOWN ||
+                            (runState == SHUTDOWN && firstTask == null)) {
+                        if (myWorkerThread.isAlive()) {
+                            // 预检查线程的状态，刚初始化的worker线程必须是未唤醒的状态
+                            throw new IllegalThreadStateException();
+                        }
+
+                        // 加入worker集合
+                        this.workers.add(newWorker);
+
+                        int workerSize = workers.size();
+                        if (workerSize > largestPoolSize) {
+                            // 如果当前worker个数超过了之前记录的最大存活线程数，将其更新
+                            largestPoolSize = workerSize;
+                        }
+
+                        // 创建成功
+                        workerAdded = true;
+                    }
+                } finally {
+                    // 无论是否发生异常，都先将主控锁解锁
+                    mainLock.unlock();
+                }
+
+                if (workerAdded) {
+                    // 加入成功，启动worker线程
+                    myWorkerThread.start();
+                    // 标识为worker线程启动成功，并作为返回值返回
+                    workerStarted = true;
+                }
+            }
+        }finally {
+            if (!workerStarted) {
+                addWorkerFailed(newWorker);
+            }
+        }
+
+        return workerStarted;
+    }
+```
 ### 如何保证中止过程中不丢失已提交的任务？
 1. 等待剩余任务执行完再关闭
 2. 把剩余的任务吐出来还给用户
