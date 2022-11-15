@@ -556,7 +556,9 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 2. 通过shutdownNow关闭线程池时，以返回值的形式将剩余的任务吐出来还给用户
    中止前已提交的任务不会丢失；而中止后线程池也不会再接收新的任务（走拒绝策略）。这两点共同保证了提交的任务不会丢失。
 ### 如何保证线程池最终关闭前，所有工作线程都已退出？
-线程池在收到中止命令进入SHUTDOWN或者STOP状态时，会一直等到工作队列为空且所有工作线程都中止退出后才会推进到TIDYING阶段。
+线程池在收到中止命令进入SHUTDOWN或者STOP状态时，会一直等到工作队列为空且所有工作线程都中止退出后才会推进到TIDYING阶段。而做到这一点的关键就在tryTerminate方法中。  
+tryTerminate方法用于在收到停止指令、工作队列中任务被移除或是工作线程退出等事件发生时，尝试将线程池推进到TIDYING阶段进而最终停止线程池。  
+其在ThreadPoolExecutor一共在6个地方被调用，分别是shutdown、shutdownNow、addWorkerFailed、processWorkerExit、remove和purge方法中被调用。
 ```java
 /**
      * 尝试判断是否满足线程池中止条件，如果满足条件，将其推进到最后的TERMINATED状态
