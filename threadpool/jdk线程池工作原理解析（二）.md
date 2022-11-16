@@ -7,7 +7,6 @@ ThreadPoolExecutor为了实现优雅停止功能，为线程池设置了一个�
 在第一篇博客中介绍过，AtomicInteger类型的变量ctl同时维护了两个业务属性当前活跃工作线程个数与线程池状态，ctl的高3位用于存放线程池状态。
 ### 线程池工作状态介绍
 线程池工作状态是单调推进的，即从运行时->停止中->完全停止。共有以下五种情况
-**todo 附状态流程图**
 ##### 1. RUNNING
 RUNNING状态，代表着线程池处于正常运行的状态**（运行时）**。RUNNING状态的线程池能正常的接收并处理提交的任务  
 在ThreadPoolExecutor初始化时通过对ctl赋予默认属性来设置（private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));）
@@ -23,6 +22,7 @@ TIDYING状态，代表着线程池即将完全终止，正在做最后的收尾�
 在线程池中所有的工作线程都已经完全退出，且工作队列中的任务已经被清空时会由SHUTDOWN或STOP状态进入TIDYING状态。
 ##### 5. TERMINATED
 TERMINATED状态，代表着线程池完全的关闭**（完全停止）**。
+![线程池状态流程图.png](线程池状态流程图.png)
 ```java
 public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     /**
@@ -121,8 +121,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 }    
 ```
-因为线程池状态不是单独存放，而是放在ctl这一32位数据的高3位的，读写都比较麻烦，因此提供了runStateOf和ctlOf方法（位运算）来简化操作。  
-线程池的状态是单调递推的，由于巧妙的设置了状态靠前的值会更小，因此可以直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning、advanceRunState）。
+* 因为线程池状态不是单独存放，而是放在ctl这一32位数据的高3位的，读写都比较麻烦，因此提供了runStateOf和ctlOf这些辅助方法方法（位运算）来简化操作。  
+* 线程池的状态是单调递进的，由于巧妙将状态靠前的值设置的更小，因此可以直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning、advanceRunState）。
 ## jdk线程池ThreadPoolExecutor优雅停止具体实现原理
 线程池的优雅停止一般要能做到以下几点：
 1. 线程池在中止后不能再受理新的任务
@@ -630,15 +630,15 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 那么之前启动的工作线程一定能通过processWorkerExit退出并销毁吗？答案是不一定，这主要取决于用户是否正确的编写了令工作线程安全退出的任务逻辑。
 因为只有能退出任务执行逻辑(runWorker方法中的task.run())的工作线程才有机会执行processWorkerExit，无法从任务中跳出(正常退出or抛异常)的工作线程将永远无法退出，导致线程池也永远无法推进到终态。
 #####
-下面分情况讨论：
-1. 任务中的逻辑是一定会执行完正常结束的（没有无限循环也没有令线程陷入阻塞态的操作）。那么这是没问题的
+下面分情况讨论： 
+* 任务中的逻辑是一定会执行完正常结束的（没有无限循环也没有令线程陷入阻塞态的操作）。那么这是没问题的
 ```java
    ()->{
         // 会正常结束的
         System.out.println("hello world!");
    };
 ```
-2. 任务中存在需要无限循环的逻辑。那么最好在循环条件内监听一个volatile的变量，当需要线程池停止时，修改这个变量，从而令任务从无限循环中正常退出。
+* 任务中存在需要无限循环的逻辑。那么最好在循环条件内监听一个volatile的变量，当需要线程池停止时，修改这个变量，从而令任务从无限循环中正常退出。
 ```java
     ()->{
         // 无限循环
@@ -655,9 +655,9 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
         }
     };
 ```
-3. 任务中存在Condition.await等会阻塞当前线程，令其无法自然退出的逻辑。
-   线程池尝试停止工作线程时会调用Worker类的interruptIfStarted方法发出中断指令（Thread.interrupt方法），如果被阻塞的方法是响应中断的， 
-   那么业务代码中不能无脑吞掉InterruptedException，而是要感知到中断异常，在确实要关闭线程池时令任务退出（向上抛异常或正常退出）
+* 任务中存在Condition.await等会阻塞当前线程，令其无法自然退出的逻辑。  
+  tryTerminate中停止工作线程时会调用Worker类的interruptIfStarted方法发出中断指令（Thread.interrupt方法），如果被阻塞的方法是响应中断的，那么业务代码中不能无脑吞掉InterruptedException，而要能感知到中断异常，在确实要关闭线程池时令任务退出（向上抛异常或正常退出）。   
+  而如果是不响应中断的阻塞方法（如ReentrantLock.lock）,则需要用户自己保证这些方法最终能够被唤醒，否则工作线程将无法正常退出而阻止线程池进入终止状态。
 ```java
     ()->{
             try {
@@ -679,5 +679,12 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
         // doSomething处理一些逻辑后。。。正常退出
     }
 ```
+##### 为什么不在线程池终止时使用Thread.stop方法强制令工作线程停止呢？
+虽然Thread.stop能够保证线程一定会被停止，但由于停止的过程中存在很严重的并发安全问题而被废弃而不推荐使用了。  
+具体原因可以参考官方文档（Why is Thread.stop deprecated?）：[https://docs.oracle.com/javase/8/docs/technotes/guides/concurrency/threadPrimitiveDeprecation.html](https://docs.oracle.com/javase/8/docs/technotes/guides/concurrency/threadPrimitiveDeprecation.html)
+
 ## 总结
+* 本篇博客从源码的角度详细分析了jdk线程池ThreadPoolExecutor关于优雅停止实现的原理。其中重点介绍了ThreadPoolExecutor是如何做到中止后不能再受理新的任务、中止时不丢失已提交任务以及关闭时不会发生线程资源的泄露等核心功能。
+* 结合之前发布的第一篇关于ThreadPoolExecutor正常运行时接受并执行所提交任务的博客，虽然没有100%的覆盖ThreadPoolExecutor的全部功能，但依然完整的讲解了ThreadPoolExecutor最核心的功能。希望这两篇博客能帮助到对jdk线程池实现原理感兴趣的读者。
+* 本篇博客的完整代码在我的github上：https://github.com/1399852153/Reinventing-the-wheel-for-learning（ThreadPool模块 MyThreadPoolExecutorV2） 内容如有错误，还请多多指教。
 

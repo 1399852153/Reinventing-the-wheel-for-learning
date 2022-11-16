@@ -166,4 +166,38 @@ public class MyThreadPoolExecutorBlogV2Test {
         Assert.assertEquals(0, myThreadPoolExecutorV2.getPoolSize());
         Assert.assertEquals(0, myThreadPoolExecutorV2.getQueue().size());
     }
+
+    @Test
+    public void testShutdown(){
+        MyThreadPoolExecutorV2 myThreadPoolExecutorV2 = new MyThreadPoolExecutorV2(
+                5, 10, 5, TimeUnit.SECONDS,
+                // 有界队列
+                new LinkedBlockingQueue<>(10),
+                Executors.defaultThreadFactory(),
+                new MyThreadPoolExecutorV2.MyAbortPolicy());
+
+        for (int i = 0; i < 5; i++) {
+            myThreadPoolExecutorV2.execute(() -> {
+                // 不是死循环，休眠后结束
+                System.out.println("666:" + Thread.currentThread().getName());
+                try {
+                    Thread.sleep(2000L);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+
+        boolean hasRejectedExecutionException = false;
+        myThreadPoolExecutorV2.shutdown();
+        try {
+            myThreadPoolExecutorV2.execute(() -> {
+
+            });
+        }catch (RejectedExecutionException rejectedExecutionException){
+            hasRejectedExecutionException = true;
+        }
+
+        Assert.assertTrue(hasRejectedExecutionException);
+    }
 }

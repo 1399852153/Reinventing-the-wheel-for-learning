@@ -2,7 +2,6 @@ package threadpool.blog;
 
 import threadpool.MyRejectedExecutionHandler;
 import threadpool.MyThreadPoolExecutor;
-import threadpool.v1.MyThreadPoolExecutorV1;
 
 import java.util.ArrayList;
 import java.util.HashSet;

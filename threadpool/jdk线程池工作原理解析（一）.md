@@ -1017,4 +1017,4 @@ newScheduledThreadPool方法创建一个支持定时任务、延迟任务执行�
 * 这篇博客中我们首先介绍了线程池的基本概念，随后在源码层面解析了jdk默认的线程池ThreadPoolExecutor在执行所提交任务的整体工作原理（RUNNING状态），
   并在最后简单的分析了jdk默认提供的四种拒绝策略和四种线程池的适用场景。
 * 希望通过这篇博客能让读者更好的理解线程池的工作原理，并在工作中更好的使用线程池。关于ThreadPoolExecutor优雅停止的原理会在下一篇博客中进行详细的分析，尽请期待。
-* 本篇博客的完整代码在我的github上：https://github.com/1399852153/Reinventing-the-wheel-for-learning（ThreadPool模块） 内容如有错误，还请多多指教。
+* 本篇博客的完整代码在我的github上：https://github.com/1399852153/Reinventing-the-wheel-for-learning（ThreadPool模块 MyThreadPoolExecutorV1） 内容如有错误，还请多多指教。
