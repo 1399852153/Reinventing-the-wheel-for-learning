@@ -1,5 +1,5 @@
 # jdk线程池工作原理解析(二)
-本篇博客是jdk线程池ThreadPoolExecutor工作原理解析系列博客的第二篇，在第一篇博客中从源码层面分析了ThreadPoolExecutor在RUNNING状态下处理任务的核心逻辑，  
+本篇博客是jdk线程池ThreadPoolExecutor工作原理解析系列博客的第二篇，在第一篇博客中从源码层面分析了ThreadPoolExecutor在RUNNING状态下处理任务的核心逻辑，
 而在这篇博客中将会详细讲解jdk线程池ThreadPoolExecutor优雅停止的实现原理。  
 * [jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一）](https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html)
 ## ThreadPoolExecutor优雅停止源码分析(自己动手实现线程池v2版本)
@@ -127,7 +127,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 线程池的优雅停止一般要能做到以下几点：
 1. 线程池在中止后不能再受理新的任务
 2. 线程池中止的过程中，已经提交的现存任务不能丢失（等待剩余任务执行完再关闭或者能够把剩余的任务吐出来还给用户）
-3. 线程池最终关闭前，确保创建的所有工作线程都已退出，不会出现资源的泄露
+3. 线程池最终关闭前，确保创建的所有工作线程都已退出，不会出现资源的泄露  
+#####
 下面我们从源码层面解析ThreadPoolExecutor，看看其是如何实现上述这三点的.
 ### 如何中止线程池
 ThreadPoolExecutor线程池提供了shutdown和shutdownNow这两个public方法给使用者用于发出线程池的停止指令。
@@ -553,12 +554,13 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 ### 如何保证中止过程中不丢失任务？
 1. 通过shutdown关闭线程池时，SHUTDOWN状态的线程池会等待所有剩余的任务执行完毕后再进入TIDYING状态。
 2. 通过shutdownNow关闭线程池时，以返回值的形式将剩余的任务吐出来还给用户  
-   中止前已提交的任务不会丢失；而中止后线程池也不会再接收新的任务（走拒绝策略）。这两点共同保证了提交的任务不会丢失。
+#####
+**中止前已提交的任务不会丢失；而中止后线程池也不会再接收新的任务（走拒绝策略）。这两点共同保证了提交的任务不会丢失。**
 ### 如何保证线程池最终关闭前，所有工作线程都已退出？
 **线程池在收到中止命令进入SHUTDOWN或者STOP状态时，会一直等到工作队列为空且所有工作线程都中止退出后才会推进到TIDYING阶段。**  
 上面描述的条件是一个复合的条件，其只有在“收到停止指令（进入SHUTDOWN或者STOP状态）”、"工作队列中任务被移除或消费（工作队列为空）"或是“工作线程退出（所有工作线程都中止退出）”这三类事件发生时才有可能满足。
 而判断是否满足条件并推进到TIDYING状态的关键就在tryTerminate方法中。tryTerminate顾名思义便是用于尝试终止线程池的，当上述任意事件触发时便判断是否满足终止条件，如果满足则将线程池推进到TIDYING阶段。  
-因此在ThreadPoolExecutor中tryTerminate一共在6个地方被调用，分别是shutdown、shutdownNow、removepurge、addWorkerFailed和processWorkerExit方法。  
+因此在ThreadPoolExecutor中tryTerminate一共在6个地方被调用，分别是shutdown、shutdownNow、remove、purge、addWorkerFailed和processWorkerExit方法。  
 #####
 * shutdown、shutdownNow方法触发收到停止指令的事件
 * remove、purge方法触发工作队列中任务被移除的事件
@@ -686,4 +688,3 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 * 本篇博客从源码的角度详细分析了jdk线程池ThreadPoolExecutor关于优雅停止实现的原理。其中重点介绍了ThreadPoolExecutor是如何做到中止后不能再受理新的任务、中止时不丢失已提交任务以及关闭时不会发生线程资源的泄露等核心功能。
 * 结合之前发布的第一篇关于ThreadPoolExecutor正常运行时接受并执行所提交任务的博客，虽然没有100%的覆盖ThreadPoolExecutor的全部功能，但依然完整的讲解了ThreadPoolExecutor最核心的功能。希望这两篇博客能帮助到对jdk线程池实现原理感兴趣的读者。
 * 本篇博客的完整代码在我的github上：https://github.com/1399852153/Reinventing-the-wheel-for-learning（ThreadPool模块 MyThreadPoolExecutorV2） 内容如有错误，还请多多指教。
-
