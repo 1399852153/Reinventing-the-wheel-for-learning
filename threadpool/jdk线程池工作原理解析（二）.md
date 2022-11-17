@@ -1,27 +1,27 @@
 # jdk线程池工作原理解析(二)
-本篇博客是jdk线程池ThreadPoolExecutor工作原理解析系列博客的第二篇，在第一篇博客中基于v1版本的MyThreadPoolExecutor从源码层面解析了ThreadPoolExecutor在RUNNING状态下处理任务的核心逻辑，
-而在这篇博客中将会展开介绍jdk线程池ThreadPoolExecutor优雅停止的原理。  
+本篇博客是jdk线程池ThreadPoolExecutor工作原理解析系列博客的第二篇，在第一篇博客中从源码层面分析了ThreadPoolExecutor在RUNNING状态下处理任务的核心逻辑，  
+而在这篇博客中将会详细讲解jdk线程池ThreadPoolExecutor优雅停止的实现原理。  
 * [jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一）](https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html)
 ## ThreadPoolExecutor优雅停止源码分析(自己动手实现线程池v2版本)
 ThreadPoolExecutor为了实现优雅停止功能，为线程池设置了一个状态属性，其共有5种情况。
-在第一篇博客中介绍过，AtomicInteger类型的变量ctl同时维护了两个业务属性当前活跃工作线程个数与线程池状态，ctl的高3位用于存放线程池状态。
+在第一篇博客中曾介绍过，AtomicInteger类型的变量ctl同时维护了两个业务属性当前活跃工作线程个数与线程池状态，其中ctl的高3位用于存放线程池状态。
 ### 线程池工作状态介绍
 线程池工作状态是单调推进的，即从运行时->停止中->完全停止。共有以下五种情况
 ##### 1. RUNNING
-RUNNING状态，代表着线程池处于正常运行的状态**（运行时）**。RUNNING状态的线程池能正常的接收并处理提交的任务  
-在ThreadPoolExecutor初始化时通过对ctl赋予默认属性来设置（private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));）
+RUNNING状态，代表着线程池处于正常运行(**运行时**)。RUNNING状态的线程池能正常的接收并处理提交的任务  
+ThreadPoolExecutor初始化时对ctl赋予的默认属性便是RUNNING（private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));）
 RUNNING状态下线程池正常工作的原理已经在第一篇博客中详细的介绍过了，这里不再赘述。
 ##### 2. SHUTDOWN
-SHUTDOWN状态，代表线程池处于停止对外服务的状态**（停止中）**。不再接收新提交的任务，但依然会将workQueue工作队列中积压的任务处理完。  
-用户可以通过调用shutdown方法令线程池由RUNNING状态进入SHUTDOWN状态，shutdown方法的会在下文详细展开分析。
+SHUTDOWN状态，代表线程池处于停止对外服务的状态(**停止中**)。不再接收新提交的任务，但依然会将workQueue工作队列中积压的任务逐步处理完。  
+用户可以通过调用shutdown方法令线程池由RUNNING状态进入SHUTDOWN状态，shutdown方法会在下文详细展开分析。
 ##### 3. STOP
-STOP状态，代表线程池处于停止状态。不再接受新提交的任务**（停止中）**，同时也不再处理workQueue工作队列中积压的任务，当前还在处理任务的工作线程将收到interrupt中断通知  
+STOP状态，代表线程池处于停止状态。不再接受新提交的任务(**停止中**)，同时也不再处理workQueue工作队列中积压的任务，当前还在处理任务的工作线程将收到interrupt中断通知  
 用户可以通过调用shutdownNow方法令线程池由RUNNING或者SHUTDOWN状态进入STOP状态，shutdownNow方法会在下文详细展开分析。
 ##### 4. TIDYING
-TIDYING状态，代表着线程池即将完全终止，正在做最后的收尾工作**（停止中）**。
+TIDYING状态，代表着线程池即将完全终止，正在做最后的收尾工作(**停止中**)。
 在线程池中所有的工作线程都已经完全退出，且工作队列中的任务已经被清空时会由SHUTDOWN或STOP状态进入TIDYING状态。
 ##### 5. TERMINATED
-TERMINATED状态，代表着线程池完全的关闭**（完全停止）**。
+TERMINATED状态，代表着线程池完全的关闭(**完全停止**)。
 ![线程池状态流程图.png](线程池状态流程图.png)
 ```java
 public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
@@ -121,8 +121,8 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     }
 }    
 ```
-* 因为线程池状态不是单独存放，而是放在ctl这一32位数据的高3位的，读写都比较麻烦，因此提供了runStateOf和ctlOf这些辅助方法方法（位运算）来简化操作。  
-* 线程池的状态是单调递进的，由于巧妙将状态靠前的值设置的更小，因此可以直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning、advanceRunState）。
+* 因为线程池状态不是单独存放，而是放在ctl这一32位数据的高3位的，读写都比较麻烦，因此提供了runStateOf和ctlOf等辅助方法（位运算）来简化操作。  
+* 线程池的状态是单调递进的，由于巧妙的将状态靠前的值设置的更小，因此通过直接比较状态的值来判断当前线程池状态是否推进到了指定的状态（runStateLessThan、runStateAtLeast、isRunning、advanceRunState）。
 ## jdk线程池ThreadPoolExecutor优雅停止具体实现原理
 线程池的优雅停止一般要能做到以下几点：
 1. 线程池在中止后不能再受理新的任务
@@ -130,7 +130,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
 3. 线程池最终关闭前，确保创建的所有工作线程都已退出，不会出现资源的泄露
 下面我们从源码层面解析ThreadPoolExecutor，看看其是如何实现上述这三点的.
 ### 如何中止线程池
-ThreadPoolExecutor线程池提供了shutdown和shutdownNow这两个public方法给使用者用于发起线程池的停止指令。
+ThreadPoolExecutor线程池提供了shutdown和shutdownNow这两个public方法给使用者用于发出线程池的停止指令。
 ##### shutdown方法
 shutdown方法用于关闭线程池，并令线程池从RUNNING状态转变位SHUTDOWN状态。位于SHUTDOWN状态的线程池，不再接收新任务，但已提交的任务会全部被执行完。
 ```java
@@ -243,13 +243,13 @@ shutdown方法用于关闭线程池，并令线程池从RUNNING状态转变位SH
 2. 通过advanceRunState方法将线程池状态推进到SHUTDOWN。
 3. 通过interruptIdleWorkers使用中断指令（Thread.interrupt）唤醒所有处于idle状态的工作线程（存在idle状态的工作线程代表着当前工作队列是空的）。 
    idle的工作线程在被唤醒后从getTask方法中退出（getTask中对应的退出逻辑在下文中展开），进而退出runWorker方法，最终系统回收掉工作线程占用的各种资源（第一篇博客中runWorker的解析中提到过）。
-4. 调用包级别修饰的钩子函数onShutdown。这一方法是作者专门为同为java.util.concurrent包下的ScheduledThreadPoolExecutor提供的拓展。具体原理不再本篇博客中展开。
+4. 调用包级别修饰的钩子函数onShutdown。这一方法是作者专门为同为java.util.concurrent包下的ScheduledThreadPoolExecutor提供的拓展，不在本篇博客中展开。
 5. 前面提到SHUTDOWN状态的线程池在工作线程都全部退出且工作队列为空时会转变为TIDYING状态，因此通过调用tryTerminate方法**尝试**终止线程池（当前不一定会满足条件，比如调用了shutdown但工作队列还有很多任务等待执行）。
    tryTerminate方法中细节比较多，下文中再展开分析。
 ##### shutdownNow方法
-shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进。shutdownNow方法令线程池从RUNNING状态转变为STOP状态，不再接收新任务，工作队列中未完成的任务会以列表的形式返回。  
-* shutdown方法在调用后，虽然不再接受新任务，但会等待工作队列中的队列被慢慢消费掉；而shutdownNow并不会等待，而是会将当前工作队列中的所有未被捞取的剩余任务全部返回给shutdownNow的调用者，并将所有的工作线程(包括非idle的线程)都打断。  
-* 这样做的好处是线程池可以更快的进入终止态，而不必等所有的剩余任务完成，且返回给用户后也不会丢任务。
+shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进。shutdownNow方法令线程池从RUNNING状态转变为STOP状态，不再接收新任务，而工作队列中未完成的任务会以列表的形式返回给shutdownNow的调用者。  
+* shutdown方法在调用后，虽然不再接受新任务，但会等待工作队列中的队列被慢慢消费掉；而shutdownNow并不会等待，而是将当前工作队列中的所有未被捞取执行的剩余任务全部返回给shutdownNow的调用者，并对所有的工作线程(包括非idle的线程)发出中断通知。  
+* 这样做的好处是线程池可以更快的进入终止态，而不必等剩余的任务都完成，都返回给用户后也不会丢任务。
 ```java
     /**
      * 立即关闭线程池（不再接收新任务，工作队列中未完成的任务会以列表的形式返回）
@@ -327,24 +327,24 @@ shutdownNow方法同样用于关闭线程池，但比shutdown方法更加激进�
 4. 通过drainQueue方法将当前工作线程中剩余的所有任务以List的形式统一返回给调用者。
 5. 通过调用tryTerminate方法**尝试**终止线程池。
 ### 如何保证线程池在中止后不能再受理新的任务？
-在execute方法作为入口，提交任务的逻辑中，v2版本（和jdk实现基本一致）相比v1版本新增了一些基于线程池状态的校验。
+在execute方法作为入口，提交任务的逻辑中，v2版本相比v1版本新增了一些基于线程池状态的校验（和jdk的实现保持一致了）。
 ##### execute方法中的校验
-* 首先在最外层的execute方法中，在向工作队列中加入新任务前（workQueue.offer）对当前线程池的状态做了一个校验（isRunning(currentCtl)）。希望非RUNNING状态的线程池不向工作队列中添加新任务  
-  但在检查时可能出与shutdown指令并发，所有在向工作队列成功加入任务后还需要再检查一次线程池状态，如果此时已经不是RUNNING状态则需要通过remove方法将刚入队的任务从队列中移除，并调用reject方法走拒绝策略
+* 首先在execute方法中，向工作队列加入新任务前（workQueue.offer）对当前线程池的状态做了一个校验（isRunning(currentCtl)）。希望非RUNNING状态的线程池不向工作队列中添加新任务  
+  但在做该检查时可能与shutdown/shutdownNow内推进线程池状态的逻辑并发执行，所以在工作队列成功加入任务后还需要再检查一次线程池状态，如果此时已经不是RUNNING状态则需要通过remove方法将刚入队的任务从队列中移除，并调用reject方法(拒绝策略)
 ##### addWorker方法中的校验
 * 在addWorker方法的入口处(retry:第一层循环通过(runState >= SHUTDOWN && !(runState == SHUTDOWN && firstTask == null && !workQueue.isEmpty())))逻辑，
   保证了不是RUNNING状态的线程池（runState >= SHUTDOWN），无法创建新的工作线程（addWorker返回false）。  
   **但有一种特殊情况**：即SHUTDOWN状态下(runState == SHUTDOWN)，工作队列不为空(!workQueue.isEmpty())，且不是第一次提交任务时创建新工作线程（firstTask == null），  
   依然允许创建新的工作线程，因为即使在SHUTDOWN状态下，某一存活的工作线程发生中断异常时，会调用processWorkerExit方法，在销毁原有工作线程后依然需要调用addWorker重新创建一个新的（firstTask == null）
 ##### execute与shutdown/shutdownNow并发时的处理
-execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并发执行的，但addWorker中有多处地方都对线程池的状态进行了检查，尽最大的可能避免线程池停止时并发的创建新的工作线程。
+execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并发执行的，但addWorker中有多处地方都对线程池的状态进行了检查，尽最大的可能避免线程池停止时继续创建新的工作线程。
 1. retry循环中，compareAndIncrementWorkerCount方法会cas的更新状态（此前获取到的ctl状态必然是RUNNING，否则走不到这里），cas成功则会跳出retry:循环（ break retry;）。 
-   而cas失败可能有两种情况： 
+   而cas失败可能有两种情况：  
    如果是workerCount发生了并发的变化，则在内层的for (;;)循环中进行重试即可  
    如果线程池由于收到终止指令而推进了状态，则随后的if (runStateOf(currentCtl) != runState)将会为true，跳出到外层的循环重试（continue retry）  
 2. 在new Worker(firstTask)后，使用mainLock获取锁后再一次检查线程池状态（if (runState < SHUTDOWN ||(runState == SHUTDOWN && firstTask == null))）。  
-   由于shutdown、shutdownNow也是通过mainLock加锁后才推进的线程池状态，因此这里的获取到的状态是准确的。
-   如果校验失败（if结果为false），则workers中不会加入新创建的工作线程，临时变量workerAdded=false，则工作线程不会启动（t.start()）。临时变量workerStarted也为false，最后会调用addWorkerFailed将新创建的工作线程给回收（回滚）
+   由于shutdown、shutdownNow也是通过mainLock加锁后才推进的线程池状态，因此这里获取到的状态是准确的。  
+   如果校验失败（if结果为false），则workers中不会加入新创建的工作线程，临时变量workerAdded=false，则工作线程不会启动（t.start()）。临时变量workerStarted也为false，最后会调用addWorkerFailed将新创建的工作线程回收掉（回滚）
 #####
 基于execute方法和addWorker方法中关于各项关于线程池停止状态校验，**最大程度的避免了线程池在停止过程中新任务的提交和可能的新工作线程的创建**。使得execute方法在线程池接收到停止指令后（>=SHUTDOWN），最终都会去执行reject拒绝策略逻辑。
 ```java
@@ -543,7 +543,6 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
     }
 ```
 ```java
-    /***/
     public boolean remove(Runnable task) {
         boolean removed = workQueue.remove(task);
         // 当一个任务从工作队列中被成功移除，可能此时工作队列为空。尝试判断是否满足线程池中止条件
@@ -553,12 +552,12 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 ```
 ### 如何保证中止过程中不丢失任务？
 1. 通过shutdown关闭线程池时，SHUTDOWN状态的线程池会等待所有剩余的任务执行完毕后再进入TIDYING状态。
-2. 通过shutdownNow关闭线程池时，以返回值的形式将剩余的任务吐出来还给用户
+2. 通过shutdownNow关闭线程池时，以返回值的形式将剩余的任务吐出来还给用户  
    中止前已提交的任务不会丢失；而中止后线程池也不会再接收新的任务（走拒绝策略）。这两点共同保证了提交的任务不会丢失。
 ### 如何保证线程池最终关闭前，所有工作线程都已退出？
 **线程池在收到中止命令进入SHUTDOWN或者STOP状态时，会一直等到工作队列为空且所有工作线程都中止退出后才会推进到TIDYING阶段。**  
 上面描述的条件是一个复合的条件，其只有在“收到停止指令（进入SHUTDOWN或者STOP状态）”、"工作队列中任务被移除或消费（工作队列为空）"或是“工作线程退出（所有工作线程都中止退出）”这三类事件发生时才有可能满足。
-而做到这一点的关键就在tryTerminate方法中，tryTerminate顾名思义便是用于尝试终止线程池，当上述任意事件触发时便判断是否满足终止条件，如果满足则将线程池推进到TIDYING阶段。  
+而判断是否满足条件并推进到TIDYING状态的关键就在tryTerminate方法中。tryTerminate顾名思义便是用于尝试终止线程池的，当上述任意事件触发时便判断是否满足终止条件，如果满足则将线程池推进到TIDYING阶段。  
 因此在ThreadPoolExecutor中tryTerminate一共在6个地方被调用，分别是shutdown、shutdownNow、removepurge、addWorkerFailed和processWorkerExit方法。  
 #####
 * shutdown、shutdownNow方法触发收到停止指令的事件
@@ -566,7 +565,7 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 * addWorkerFailed、processWorkerExit方法触发工作线程退出的事件
 ##### tryTerminate源码分析
 ```java
-/**
+   /**
      * 尝试判断是否满足线程池中止条件，如果满足条件，将其推进到最后的TERMINATED状态
      * 注意：必须在任何可能触发线程池中止的场景下调用（例如工作线程退出，或者SHUTDOWN状态下队列工作队列为空等）
      * */
@@ -626,7 +625,7 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
     }
 ```
 ##### 如何保证工作线程一定能成功退出？
-从上面tryTerminate可以看到线程池必须等到所有工作线程都全部退出（workerCount为0），工作线程占用的全部资源都回收后才会推进到终止态。  
+从上面tryTerminate方法的实现中可以看到，线程池必须等到所有工作线程都全部退出（workerCount为0），工作线程占用的全部资源都回收后才会推进到终止态。  
 那么之前启动的工作线程一定能通过processWorkerExit退出并销毁吗？答案是不一定，这主要取决于用户是否正确的编写了令工作线程安全退出的任务逻辑。
 因为只有能退出任务执行逻辑(runWorker方法中的task.run())的工作线程才有机会执行processWorkerExit，无法从任务中跳出(正常退出or抛异常)的工作线程将永远无法退出，导致线程池也永远无法推进到终态。
 #####
@@ -642,7 +641,7 @@ execute提交任务时addWorker方法和shutdown/shutdownNow方法是可能并�
 ```java
     ()->{
         // 无限循环
-        while(!isStop){
+        while(true){
             System.out.println("hello world!");
         }
     };
