@@ -1101,6 +1101,32 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         }
     }
 
+    final boolean isRunningOrShutdown(boolean shutdownOK) {
+        int rs = runStateOf(ctl.get());
+
+        if(rs == RUNNING){
+            // running状态，允许任务运行
+            return true;
+        }
+
+        if(rs == SHUTDOWN && shutdownOK){
+            // shutdown状态，但shutdownOK=true，也允许任务运行
+            return true;
+        }
+
+        // 推进到大于shutdown状态或shutdown状态下（shutdownOK=false），不能再执行了
+        return false;
+    }
+
+    void ensurePrestart() {
+        int wc = workerCountOf(ctl.get());
+        if (wc < corePoolSize) {
+            addWorker(null, true);
+        } else if (wc == 0) {
+            addWorker(null, false);
+        }
+    }
+
     // ===================== 留给子类做拓展的方法 =======================
     /**
      * 任务执行前

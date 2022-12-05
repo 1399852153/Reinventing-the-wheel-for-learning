@@ -21,9 +21,19 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
      * */
     private volatile boolean removeOnCancel = false;
 
+    /**
+     * False if should cancel/suppress periodic tasks on shutdown.
+     */
+    private volatile boolean continueExistingPeriodicTasksAfterShutdown = false;
+
+    /**
+     * False if should cancel non-periodic tasks on shutdown.
+     */
+    private volatile boolean executeExistingDelayedTasksAfterShutdown = true;
+
 
     public MyScheduledThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory, MyRejectedExecutionHandler handler) {
-        // todo 待优化
+        // todo 待优化，构造方法里还差了一些逻辑
         super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory, handler);
     }
 
@@ -221,15 +231,16 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
             long p = period;
             if (p > 0) {
                 // fixedRate周期性任务，单纯的加period
+                // （不用考虑溢出，因为如果因为time太大而溢出了（long类型溢出说明下一次执行时间是天荒地老），则永远不会被执行也是合理的）
                 time += p;
             } else {
-                //
+                // 下一次调度的时间（需要处理溢出）
                 time = triggerTime(-p);
             }
         }
 
         /**
-         * 取消
+         * 取消当前任务的执行
          * */
         @Override
         public boolean cancel(boolean mayInterruptIfRunning) {
@@ -244,19 +255,55 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 
         @Override
         public void run() {
-            // todo
-//            boolean periodic = isPeriodic();
-//            if (!canRunInCurrentRunState(periodic))
-//                cancel(false);
-//            else if (!periodic)
-//                ScheduledThreadPoolExecutor.ScheduledFutureTask.super.run();
-//            else if (ScheduledThreadPoolExecutor.ScheduledFutureTask.super.runAndReset()) {
-//                setNextRunTime();
-//                reExecutePeriodic(outerTask);
-//            }
+            boolean periodic = isPeriodic();
+            // 根据当前线程池状态，判断当前任务是否应该取消(比如已经是STOP了，就应该停止继续运行了)
+            if (!canRunInCurrentRunState(periodic)) {
+                // 不能正常运行，取消掉
+                cancel(false);
+            } else if (!periodic) {
+                // 非周期性任务，当做普通的任务直接run就行了
+                MyScheduledFutureTask.super.run();
+            } else if (MyScheduledFutureTask.super.runAndReset()) {
+                // 设置下一次执行的事件
+                setNextRunTime();
+                reExecutePeriodic(outerTask);
+            }
         }
     }
 
+    /**
+     * 尝试重新提交并执行周期性任务
+     * */
+    void reExecutePeriodic(RunnableScheduledFuture<?> task) {
+        if (canRunInCurrentRunState(true)) {
+            // 当前线程池状态允许执行任务，将任务加入到工作队列中去
+            super.getQueue().add(task);
+            // 再次检查，如果状态发生了变化，不允许了，则通过remove方法将刚加入的任务移除掉，实现回滚
+            // 和ThreadPoolExecutor一致都是为了让shutdown/stop状态的线程池尽量在状态变更和提交新任务出现并发时，不要去执行新任务尽早终止线程池
+            if (!canRunInCurrentRunState(true) && super.remove(task)) {
+                task.cancel(false);
+            } else {
+                // 确保至少有一个工作线程会处理当前提交的任务
+                super.ensurePrestart();
+            }
+        }
+    }
+
+    /**
+     * Returns true if can run a task given current run state
+     * and run-after-shutdown parameters.
+     *
+     * @param periodic true if this task periodic, false if delayed
+     */
+    boolean canRunInCurrentRunState(boolean periodic) {
+        if(periodic){
+            // 周期性任务，由continueExistingPeriodicTasksAfterShutdown决定
+            return super.isRunningOrShutdown(continueExistingPeriodicTasksAfterShutdown);
+        }else{
+            // 非周期性任务（普通延迟任务），由executeExistingDelayedTasksAfterShutdown决定
+            return super.isRunningOrShutdown(executeExistingDelayedTasksAfterShutdown);
+        }
+    }
 
     @Override
     public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
