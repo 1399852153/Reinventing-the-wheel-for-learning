@@ -3,9 +3,7 @@ package threadpool.blog;
 import threadpool.MyRejectedExecutionHandler;
 import threadpool.MyScheduledExecutorService;
 
-import java.util.AbstractQueue;
-import java.util.Collection;
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
@@ -374,6 +372,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 
         /**
          * 第k位的元素在二叉堆中上滤（小顶堆：最小的元素在堆顶）
+         * Call only when holding lock.
          *
          * 当新元素插入完全二叉堆时，我们直接将其插入向量末尾(堆底最右侧)，此时新元素的优先级可能会大于其双亲元素甚至祖先元素，破坏了堆序性，
          * 因此我们需要对插入的新元素进行一次上滤操作，使完全二叉堆恢复堆序性。
@@ -413,9 +412,9 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 
         /**
          * 第k位的元素在二叉堆中下滤（小顶堆：最小的元素在堆顶）
+         * Call only when holding lock.
          *
          * 当优先级队列中极值元素出队时，需要在满足堆序性的前提下，选出新的极值元素。
-         * 我们简单的将当前向量末尾的元素放在堆顶，堆序性很有可能被破坏了。此时，我们需要对当前的堆顶元素进行一次下滤操作，使得整个完全二叉堆恢复堆序性。
          * */
         private void siftDown(int k, RunnableScheduledFuture<?> key) {
             // half为size的一半
@@ -455,7 +454,131 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
             setIndex(key, k);
         }
 
+        /**
+         * 二叉堆扩容
+         * Call only when holding lock.
+         */
+        private void grow() {
+            int oldCapacity = queue.length;
+            // 在原有基础上扩容50%
+            int newCapacity = oldCapacity + (oldCapacity >> 1); // grow 50%
+            if (newCapacity < 0) {
+                // 处理扩容50%后整型溢出
+                newCapacity = Integer.MAX_VALUE;
+            }
+            // 将原来数组中的数组数据复制到新数据
+            // 令成员变量queue指向扩容后的新数组
+            queue = Arrays.copyOf(queue, newCapacity);
+        }
+
+        /**
+         * 查询x在二叉堆中的数组下标
+         * @return 找到了就返回具体的下标，没找到返回-1
+         * */
+        private int indexOf(Object x) {
+            if(x == null){
+                // 为空，直接返回-1
+                return -1;
+            }
+
+            if (x instanceof MyScheduledFutureTask) {
+                int i = ((MyScheduledFutureTask) x).heapIndex;
+                // 为什么不直接以x.heapIndex为准?
+                // 因为可能对象x来自其它的线程池，而不是本线程池的
+                // (先判断i是否合法，然后判断第heapIndex个是否就是x)
+                if (i >= 0 && i < size && queue[i] == x) {
+                    // 比对一下第heapIndex项是否就是x，如果是则直接返回
+                    return i;
+                }else{
+                    // heapIndex不合法或者queue[i] != x不相等，说明不是本线程池的任务对象，返回-1
+                    return -1;
+                }
+            } else {
+                // 非ScheduledFutureTask，从头遍历到尾进行线性的检查
+                for (int i = 0; i < size; i++) {
+                    // 如果x和第i个相等，则返回i
+                    if (x.equals(queue[i])) {
+                        return i;
+                    }
+                }
+
+                // 遍历完了整个queue都没找到，返回-1
+                return -1;
+            }
+        }
+
         // ============================= 实现接口定义的方法 ======================================
+        @Override
+        public boolean contains(Object x) {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 不为-1就是存在，返回true
+                // 反之就是不存在，返回false
+                return indexOf(x) != -1;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public boolean remove(Object x) {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                int i = indexOf(x);
+                if (i < 0) {
+                    // x不存在，直接返回
+                    return false;
+                }
+
+                // x存在，先将其index设置为-1
+                setIndex(queue[i], -1);
+                // 二叉堆元素数量自减1
+                int s = --size;
+
+                // 将队列最尾端的元素取出
+                RunnableScheduledFuture<?> replacement = queue[s];
+                queue[s] = null;
+
+                // s == i,说明被删除的是最尾端的元素，移除后没有破坏堆序性，直接返回即可
+                if (s != i) {
+                    // 将队列最尾端的元素放到被移除元素的位置，进行一次下滤
+                    siftDown(i, replacement);
+                    if (queue[i] == replacement) {
+                        // 这里为什么还要上滤一次呢？其实是最尾端的元素replacement在放到第i个位置上执行下滤后，其虽然保证了小于其左右孩子节点，但依然可能大于其双亲节点
+                        // 举个例子：
+                        //                0
+                        //         10           1
+                        //      20   30      2    3
+                        //    40 50 60 70   4 5  6 7
+                        // 如果删除第3排第一个的20，则siftDown后会变成:
+                        //                0
+                        //         10           1
+                        //      7    30      2    3
+                        //    40 50 60 70   4 5  6
+                        // replacement=7是小于其双亲节点10的，因此需要再进行一次上滤，使得最终结果为：
+                        //                0
+                        //         7           1
+                        //      10   30      2    3
+                        //    40 50 60 70   4 5  6
+                        // 这种需要上滤的情况是相对特殊的，只有当下滤只有这个节点没有动（即下滤后queue[i] == replacement）
+                        // 因为这种情况下replacement不进行上滤的话**可能**小于其双亲节点，而违反了堆序性（heap invariant）
+                        // 而如果下滤后移动了位置（queue[i] != replacement），则其必定大于其双亲节点,因此不需要尝试上滤了
+                        siftUp(i, replacement);
+
+                        // 额外的：
+                        // 最容易理解的实现删除堆中元素的方法是将replacement置于堆顶（即第0个位置），进行一次时间复杂度为O（log n）的完整下滤而恢复堆序性
+                        // 但与ScheduledThreadExecutor在第i个位置上进行下滤操作的算法相比其时间复杂度是更高的
+                        // jdk的实现中即使下滤完成后再进行一次上滤，其**最差情况**也与从堆顶开始下滤的算法的性能一样。虽然难理解一些但却是更高效的堆元素删除算法
+                    }
+                }
+                return true;
+            } finally {
+                lock.unlock();
+            }
+        }
+
         @Override
         public Iterator<Runnable> iterator() {
             return null;
@@ -516,4 +639,15 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
             return null;
         }
     }
+
+    public static void main(String[] args) {
+        PriorityQueue<Integer> priorityQueue = new PriorityQueue<>(Arrays.asList(0,4,1,5,6,2,3));
+
+        System.out.println(priorityQueue);
+
+        priorityQueue.remove(5);
+        System.out.println(priorityQueue);
+
+    }
+
 }
