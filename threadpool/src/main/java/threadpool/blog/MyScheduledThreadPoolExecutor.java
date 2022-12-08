@@ -571,10 +571,196 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
                         // 最容易理解的实现删除堆中元素的方法是将replacement置于堆顶（即第0个位置），进行一次时间复杂度为O（log n）的完整下滤而恢复堆序性
                         // 但与ScheduledThreadExecutor在第i个位置上进行下滤操作的算法相比其时间复杂度是更高的
                         // jdk的实现中即使下滤完成后再进行一次上滤，其**最差情况**也与从堆顶开始下滤的算法的性能一样。虽然难理解一些但却是更高效的堆元素删除算法
+                        // 在remove方法等移除队列中间元素时，会比从堆顶直接下滤效率高
                     }
                 }
                 return true;
             } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public int size() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                return size;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return size() == 0;
+        }
+
+        @Override
+        public int remainingCapacity() {
+            // 无界队列，按照接口约定返回Integer.MAX_VALUE
+            return Integer.MAX_VALUE;
+        }
+
+        @Override
+        public RunnableScheduledFuture<?> peek() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 返回队列头元素
+                return queue[0];
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * 入队操作
+         * */
+        @Override
+        public boolean offer(Runnable x) {
+            if (x == null) {
+                throw new NullPointerException();
+            }
+
+            RunnableScheduledFuture<?> e = (RunnableScheduledFuture<?>)x;
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                int i = size;
+                if (i >= queue.length) {
+                    // 容量不足，扩容
+                    grow();
+                }
+                size = i + 1;
+                if (i == 0) {
+                    // 队列此前为空，第0位设置就ok了
+                    queue[0] = e;
+                    setIndex(e, 0);
+                } else {
+                    // 队列此前不为空，加入队尾进行一次上滤，恢复堆序性
+                    siftUp(i, e);
+                }
+
+                // 插入堆后，发现自己是队列头（最早要执行的任务）
+                if (queue[0] == e) {
+                    // 已经有新的队列头任务了，leader设置为空
+                    leader = null;
+                    // 通知take时阻塞等待获取新任务的工作线程
+                    available.signal();
+                }
+            } finally {
+                lock.unlock();
+            }
+
+            // 无界队列，入队一定成功
+            return true;
+        }
+
+        @Override
+        public void put(Runnable runnable){
+            offer(runnable);
+        }
+
+        @Override
+        public boolean add(Runnable e) {
+            return offer(e);
+        }
+
+        @Override
+        public boolean offer(Runnable e, long timeout, TimeUnit unit) {
+            // 无界队列，offer无需等待
+            return offer(e);
+        }
+
+        /**
+         * 队列元素f出队操作（修改size等数据，并且恢复f移除后的堆序性）
+         * */
+        private RunnableScheduledFuture<?> finishPoll(RunnableScheduledFuture<?> f) {
+            // size自减1
+            int s = --size;
+            RunnableScheduledFuture<?> x = queue[s];
+            queue[s] = null;
+            if (s != 0) {
+                // 由于队列头元素出队了，把队尾元素放到队头进行一次下滤，以恢复堆序性
+                siftDown(0, x);
+            }
+            // 被移除的元素f，index设置为-1
+            setIndex(f, -1);
+
+            // 返回被移除队列的元素
+            return f;
+        }
+
+        /**
+         * 出队操作（非阻塞）
+         * */
+        @Override
+        public RunnableScheduledFuture<?> poll() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                RunnableScheduledFuture<?> first = queue[0];
+                if (first == null || first.getDelay(NANOSECONDS) > 0) {
+                    // 如果队列为空或者队头元素没到需要执行的时间点（delay>0），返回null
+                    return null;
+                } else {
+                    // 返回队列头元素，并且恢复堆序性
+                    return finishPoll(first);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public RunnableScheduledFuture<?> take() throws InterruptedException {
+            final ReentrantLock lock = this.lock;
+            // take是可响应中断的
+            lock.lockInterruptibly();
+            try {
+                for (;;) {
+                    RunnableScheduledFuture<?> first = queue[0];
+                    if (first == null) {
+                        // 队列为空，await等待（可响应中断）
+                        available.await();
+                    } else {
+                        // 队列不为空
+                        long delay = first.getDelay(NANOSECONDS);
+                        if (delay <= 0) {
+                            // 队列头的元素delay<=0，到可执行的时间点了，返回即可
+                            return finishPoll(first);
+                        }
+                        // first设置为null，便于await期间提早gc这个临时变量
+                        first = null; // don't retain ref while waiting
+
+                        if (leader != null){
+                            // leader不为空，说明已经有别的线程在take等待了，await无限等待
+                            // （不带超时时间的await性能更好一些，队列头元素只需要由leader线程来获取就行，其它的线程就等leader处理完队头任务后将其唤醒）
+                            available.await();
+                        } else {
+                            // leader为空，说明之前没有别的线程在take等待
+                            Thread thisThread = Thread.currentThread();
+                            // 令当前线程为leader
+                            leader = thisThread;
+                            try {
+                                // leader await带超时时间（等待队列头的任务delay时间，确保任务可执行时第一时间被唤醒去执行）
+                                available.awaitNanos(delay);
+                            } finally {
+                                if (leader == thisThread) {
+                                    // take方法退出，当前线程不再是leader了
+                                    leader = null;
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if (leader == null && queue[0] != null) {
+                    // leader为空，且队列不为空（比如leader线程被唤醒后，通过finishPoll已经获得了之前的队列头元素）
+                    // 尝试唤醒之前阻塞等待的那些消费者线程
+                    available.signal();
+                }
                 lock.unlock();
             }
         }
@@ -585,33 +771,8 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         }
 
         @Override
-        public int size() {
-            return 0;
-        }
-
-        @Override
-        public void put(Runnable runnable) throws InterruptedException {
-
-        }
-
-        @Override
-        public boolean offer(Runnable runnable, long timeout, TimeUnit unit) throws InterruptedException {
-            return false;
-        }
-
-        @Override
-        public Runnable take() throws InterruptedException {
-            return null;
-        }
-
-        @Override
         public Runnable poll(long timeout, TimeUnit unit) throws InterruptedException {
             return null;
-        }
-
-        @Override
-        public int remainingCapacity() {
-            return 0;
         }
 
         @Override
@@ -623,31 +784,5 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         public int drainTo(Collection<? super Runnable> c, int maxElements) {
             return 0;
         }
-
-        @Override
-        public boolean offer(Runnable runnable) {
-            return false;
-        }
-
-        @Override
-        public Runnable poll() {
-            return null;
-        }
-
-        @Override
-        public Runnable peek() {
-            return null;
-        }
     }
-
-    public static void main(String[] args) {
-        PriorityQueue<Integer> priorityQueue = new PriorityQueue<>(Arrays.asList(0,4,1,5,6,2,3));
-
-        System.out.println(priorityQueue);
-
-        priorityQueue.remove(5);
-        System.out.println(priorityQueue);
-
-    }
-
 }
