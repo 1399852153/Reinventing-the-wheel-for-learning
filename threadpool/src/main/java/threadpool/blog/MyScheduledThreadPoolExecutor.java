@@ -766,12 +766,103 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         }
 
         @Override
-        public Iterator<Runnable> iterator() {
-            return null;
+        public RunnableScheduledFuture<?> poll(long timeout, TimeUnit unit) throws InterruptedException {
+            long nanos = unit.toNanos(timeout);
+            final ReentrantLock lock = this.lock;
+            // pool是可响应中断的
+            lock.lockInterruptibly();
+            try {
+                for (;;) {
+                    RunnableScheduledFuture<?> first = queue[0];
+                    if (first == null) {
+                        // 队列为空
+                        if (nanos <= 0) {
+                            // timeout等待时间超时了，返回null(一般不是第一次循环)
+                            return null;
+                        } else {
+                            // 队列元素为空，等待timeout
+                            nanos = available.awaitNanos(nanos);
+                        }
+                    } else {
+                        // 队列不为空
+                        long delay = first.getDelay(NANOSECONDS);
+                        if (delay <= 0) {
+                            // delay<=0,队头元素满足出队条件
+                            return finishPoll(first);
+                        }
+                        if (nanos <= 0) {
+                            // 队列不为空，但是timeout等待时间超时了，返回null(一般不是第一次循环)
+                            return null;
+                        }
+                        // first设置为null，便于await期间提早gc这个临时变量
+                        first = null; // don't retain ref while waiting
+                        if (nanos < delay || leader != null) {
+                            // poll指定的等待时间小于队头元素delay的时间，或者leader不为空(之前已经有别的线程在等待了捞取任务了)
+                            // 最多等待到timeout
+                            nanos = available.awaitNanos(nanos);
+                        } else {
+                            // 队头元素delay的时间早于waitTime指定的时间，且此前leader为null
+                            // 当前线程成为leader
+                            Thread thisThread = Thread.currentThread();
+                            leader = thisThread;
+                            try {
+                                // 等待delay时间
+                                long timeLeft = available.awaitNanos(delay);
+                                // 醒来后，nanos自减
+                                nanos -= delay - timeLeft;
+                            } finally {
+                                if (leader == thisThread) {
+                                    leader = null;
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if (leader == null && queue[0] != null) {
+                    // leader为空，且队列不为空（比如leader线程被唤醒后，通过finishPoll已经获得了之前的队列头元素）
+                    // 尝试唤醒之前阻塞等待的那些消费者线程
+                    available.signal();
+                }
+                lock.unlock();
+            }
         }
 
         @Override
-        public Runnable poll(long timeout, TimeUnit unit) throws InterruptedException {
+        public void clear() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                for (int i = 0; i < size; i++) {
+                    RunnableScheduledFuture<?> t = queue[i];
+                    if (t != null) {
+                        // 将队列内部数组的值全部设置为null
+                        queue[i] = null;
+                        // 所有任务对象的index都设置为-1
+                        setIndex(t, -1);
+                    }
+                }
+                size = 0;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Returns first element only if it is expired.
+         * Used only by drainTo.  Call only when holding lock.
+         */
+        private RunnableScheduledFuture<?> peekExpired() {
+            // assert lock.isHeldByCurrentThread();
+            RunnableScheduledFuture<?> first = queue[0];
+
+            // todo 待完善
+            return (first == null || first.getDelay(NANOSECONDS) > 0) ?
+                    null : first;
+        }
+
+        @Override
+        public Iterator<Runnable> iterator() {
             return null;
         }
 
