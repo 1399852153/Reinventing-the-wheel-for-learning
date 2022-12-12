@@ -880,7 +880,7 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
     /**
      * 根据指定的拒绝处理器，执行拒绝策略
      * */
-    private void reject(Runnable command) {
+    final void reject(Runnable command) {
         this.handler.rejectedExecution(command, this);
     }
 
@@ -1118,6 +1118,9 @@ public class MyThreadPoolExecutorV2 implements MyThreadPoolExecutor {
         return false;
     }
 
+    /**
+     * 确保至少有一个工作线程会处理当前提交的任务
+     * */
     void ensurePrestart() {
         int wc = workerCountOf(ctl.get());
         if (wc < corePoolSize) {

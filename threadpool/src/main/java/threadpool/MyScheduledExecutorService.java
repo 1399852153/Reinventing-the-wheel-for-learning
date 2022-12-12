@@ -12,15 +12,7 @@ public interface MyScheduledExecutorService{
      * @param delay 延迟时间
      * @param unit 延迟时间单位
      * */
-    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit);
-
-//    /**
-//     * 提交一个只执行一次的任务callable，在延迟delay时间后执行
-//     * @param callable 任务对象
-//     * @param delay 延迟时间
-//     * @param unit 延迟时间单位
-//     * */
-//    public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay, TimeUnit unit);
+    ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit);
 
     /**
      * 提交一个周期性执行的任务command，在延迟initialDelay后第一次执行，随后每间隔period执行一次
@@ -31,7 +23,7 @@ public interface MyScheduledExecutorService{
      * @param period 间隔执行时间
      * @param unit 时间单位
      * */
-    public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit);
+    ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit);
 
     /**
      * 提交一个周期性执行的任务command，在延迟initialDelay后第一次执行，随后在每一次任务执行完成后，延迟delay后开启下一次任务
@@ -42,5 +34,5 @@ public interface MyScheduledExecutorService{
      * @param delay 距离上一次执行的延迟时间
      * @param unit 时间单位
      * */
-    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit);
+    ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit);
 }

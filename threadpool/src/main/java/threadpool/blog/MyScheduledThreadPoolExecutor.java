@@ -11,6 +11,9 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
+/**
+ * MyScheduledThreadPoolExecutor
+ * */
 public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implements MyScheduledExecutorService {
 
     /**
@@ -34,10 +37,11 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
      */
     private volatile boolean executeExistingDelayedTasksAfterShutdown = true;
 
-
-    public MyScheduledThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory, MyRejectedExecutionHandler handler) {
-        // todo 待优化，构造方法里还差了一些逻辑
-        super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory, handler);
+    public MyScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory, MyRejectedExecutionHandler handler) {
+        // 工作队列DelayedWorkQueue是无界队列，只需要指定corePoolSize即可，maximumPoolSize没用
+        // keepAliveTime=0，一般来说核心线程是不应该退出的，除非父类里allowCoreThreadTimeOut被设置为true了
+        // 那样没有任务时核心线程就会立即被回收了(keepAliveTime=0, allowCoreThreadTimeOut=true)
+        super(corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS, new MyDelayedWorkQueue(), threadFactory, handler);
     }
 
     /**
@@ -101,6 +105,35 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
     }
 
     /**
+     * Main execution method for delayed or periodic tasks.  If pool
+     * is shut down, rejects the task. Otherwise adds task to queue
+     * and starts a thread, if necessary, to run it.  (We cannot
+     * prestart the thread to run the task because the task (probably)
+     * shouldn't be run yet.)  If the pool is shut down while the task
+     * is being added, cancel and remove it if required by state and
+     * run-after-shutdown parameters.
+     *
+     * @param task the task
+     */
+    private void delayedExecute(RunnableScheduledFuture<?> task) {
+        if (isShutdown()) {
+            // 线程池已经终止了，执行reject拒绝策略
+            super.reject(task);
+        } else {
+            // 没有终止，任务在工作队列中入队
+            super.getQueue().add(task);
+            // 再次检查状态，如果线程池已经终止则回滚（将任务对象从工作队列中remove掉，并且当前任务Future执行cancel方法取消掉）
+            // 在提交任务与线程池终止并发时，推进线程池尽早到达终结态
+            if (isShutdown() && !canRunInCurrentRunState(task.isPeriodic()) && remove(task)) {
+                task.cancel(false);
+            } else {
+                // 确保至少有一个工作线程会处理当前提交的任务
+                ensurePrestart();
+            }
+        }
+    }
+
+    /**
      * 尝试重新提交并执行周期性任务
      * */
     void reExecutePeriodic(RunnableScheduledFuture<?> task) {
@@ -136,17 +169,74 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 
     @Override
     public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-        return null;
+        if (command == null || unit == null) {
+            throw new NullPointerException();
+        }
+
+        // 装饰任务对象
+        RunnableScheduledFuture<?> t = decorateTask(command,
+                new MyScheduledFutureTask<Void>(command, null, triggerTime(delay, unit)));
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
     }
 
     @Override
     public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit) {
-        return null;
+        if (command == null || unit == null) {
+            throw new NullPointerException();
+        }
+        if (period <= 0) {
+            throw new IllegalArgumentException();
+        }
+
+        // 固定周期重复执行的任务，period参数为正数
+        MyScheduledFutureTask<Void> scheduledFutureTask = new MyScheduledFutureTask<>(
+                command, null, triggerTime(initialDelay, unit), unit.toNanos(period));
+
+        // 装饰任务对象
+        RunnableScheduledFuture<Void> t = decorateTask(command, scheduledFutureTask);
+
+        // 记录用户实际提交的任务对象
+        scheduledFutureTask.outerTask = t;
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
     }
 
     @Override
     public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit) {
-        return null;
+        if (command == null || unit == null)
+            throw new NullPointerException();
+        if (delay <= 0)
+            throw new IllegalArgumentException();
+
+        // 固定延迟重复执行的任务,period参数为负数
+        MyScheduledFutureTask<Void> scheduledFutureTask =
+                new MyScheduledFutureTask<>(command, null, triggerTime(initialDelay, unit), unit.toNanos(-delay));
+
+        // 装饰任务对象
+        RunnableScheduledFuture<Void> t = decorateTask(command, scheduledFutureTask);
+
+        // 记录用户实际提交的任务对象
+        scheduledFutureTask.outerTask = t;
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
+    }
+
+    /**
+     * 可以由用户子类拓展的，可以装饰原始RunnableScheduledFuture任务对象
+     * */
+    protected <V> RunnableScheduledFuture<V> decorateTask(
+            Runnable runnable, RunnableScheduledFuture<V> task) {
+        return task;
     }
 
     /**
@@ -328,7 +418,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
      * 2.实现上综合了juc包下的DelayQueue和PriorityQueue的功能，并加上了一些基于ScheduledThreadPoolExecutor的一些逻辑
      *   建议读者在理解了PriorityQueue、DelayQueue原理之后再来学习其工作机制，循序渐进而事半功倍
      * */
-    static class DelayedWorkQueue extends AbstractQueue<Runnable> implements BlockingQueue<Runnable> {
+    static class MyDelayedWorkQueue extends AbstractQueue<Runnable> implements BlockingQueue<Runnable> {
         /**
          * 完全二叉堆底层数组的初始容量
          * */
@@ -853,27 +943,148 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
          * Used only by drainTo.  Call only when holding lock.
          */
         private RunnableScheduledFuture<?> peekExpired() {
-            // assert lock.isHeldByCurrentThread();
             RunnableScheduledFuture<?> first = queue[0];
 
-            // todo 待完善
-            return (first == null || first.getDelay(NANOSECONDS) > 0) ?
-                    null : first;
-        }
-
-        @Override
-        public Iterator<Runnable> iterator() {
-            return null;
+            // 如果队头元素存在，且已到期（expired） 即delay <= 0,返回队头元素，否则返回null
+            return (first == null || first.getDelay(NANOSECONDS) > 0) ? null : first;
         }
 
         @Override
         public int drainTo(Collection<? super Runnable> c) {
-            return 0;
+            if (c == null) {
+                throw new NullPointerException();
+            }
+            if (c == this) {
+                throw new IllegalArgumentException();
+            }
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                RunnableScheduledFuture<?> first;
+                int n = 0;
+                // 延迟队列的drainTo只返回已过期的所有元素
+                while ((first = peekExpired()) != null) {
+                    // 已过期的元素加入参数指定的集合
+                    c.add(first);   // In this order, in case add() throws.
+                    // 同时将其从队列中移除
+                    finishPoll(first);
+                    // 总共迁移元素的个数自增
+                    ++n;
+                }
+
+                // 队列为空，或者队列头元素未过期则跳出循环
+                // 返回总共迁移元素的个数
+                return n;
+            } finally {
+                lock.unlock();
+            }
         }
 
         @Override
         public int drainTo(Collection<? super Runnable> c, int maxElements) {
-            return 0;
+            if (c == null) {
+                throw new NullPointerException();
+            }
+            if (c == this) {
+                throw new IllegalArgumentException();
+            }
+            if (maxElements <= 0) {
+                return 0;
+            }
+
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                RunnableScheduledFuture<?> first;
+                int n = 0;
+                // 延迟队列的drainTo只返回已过期的所有元素,且当前总共迁移元素的个数不超过参数maxElements的限制
+                while (n < maxElements && (first = peekExpired()) != null) {
+                    // 已过期的元素加入参数指定的集合
+                    c.add(first);   // In this order, in case add() throws.
+                    // 同时将其从队列中移除
+                    finishPoll(first);
+                    // 实际总迁移元素的个数自增
+                    ++n;
+                }
+
+                // 队列为空，或者队列头元素未过期则跳出循环
+                // 返回实际总迁移元素的个数
+                return n;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public Object[] toArray() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 队列底层本来就是数组，直接copy一份即可
+                return Arrays.copyOf(queue, size, Object[].class);
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public <T> T[] toArray(T[] a) {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 队列底层本来就是数组，直接copy一份即可
+                if (a.length < size) {
+                    return (T[]) Arrays.copyOf(queue, size, a.getClass());
+                }
+                System.arraycopy(queue, 0, a, 0, size);
+                if (a.length > size) {
+                    a[size] = null;
+                }
+                return a;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public Iterator<Runnable> iterator() {
+            return new MyDelayedWorkQueue.Itr(Arrays.copyOf(queue, size));
+        }
+
+        /**
+         * Snapshot iterator that works off copy of underlying q array.
+         *
+         * 迭代器为当前队列底层数组的迭代器
+         */
+        private class Itr implements Iterator<Runnable> {
+            final RunnableScheduledFuture<?>[] array;
+            int cursor = 0;     // index of next element to return
+            int lastRet = -1;   // index of last element, or -1 if no such
+
+            Itr(RunnableScheduledFuture<?>[] array) {
+                this.array = array;
+            }
+
+            public boolean hasNext() {
+                return cursor < array.length;
+            }
+
+            public Runnable next() {
+                if (cursor >= array.length) {
+                    throw new NoSuchElementException();
+                }
+                lastRet = cursor;
+                return array[cursor++];
+            }
+
+            public void remove() {
+                if (lastRet < 0) {
+                    throw new IllegalStateException();
+                }
+                MyDelayedWorkQueue.this.remove(array[lastRet]);
+                lastRet = -1;
+            }
         }
     }
 }
