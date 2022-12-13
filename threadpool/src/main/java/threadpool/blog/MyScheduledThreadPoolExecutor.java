@@ -168,28 +168,34 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
     }
 
     /**
-     * 拓展父类线程池在shutdown时执行的钩子函数
+     * 拓展父类线程池在shutdown时执行的钩子函数，用于清理待执行的周期性任务
      * */
     @Override
     void onShutdown() {
         BlockingQueue<Runnable> q = super.getQueue();
         boolean keepDelayed = getExecuteExistingDelayedTasksAfterShutdownPolicy();
         boolean keepPeriodic = getContinueExistingPeriodicTasksAfterShutdownPolicy();
+
+        // 既不允许在shutdown时保留一次性的DelayedTask，也不允许shutdown时保留周期性的PeriodicTask
         if (!keepDelayed && !keepPeriodic) {
             for (Object e : q.toArray()) {
+                // 将工作队列里的所有RunnableScheduledFuture全部cancel取消掉
                 if (e instanceof RunnableScheduledFuture<?>) {
                     ((RunnableScheduledFuture<?>) e).cancel(false);
                 }
             }
+            // 最后清空工作队列
             q.clear();
         } else {
             // Traverse snapshot to avoid iterator exceptions
             for (Object e : q.toArray()) {
                 if (e instanceof RunnableScheduledFuture) {
                     RunnableScheduledFuture<?> t = (RunnableScheduledFuture<?>)e;
-                    if ((t.isPeriodic() ? !keepPeriodic : !keepDelayed) ||
-                            t.isCancelled()) { // also remove if already cancelled
+                    // 1. 周期性任务，看keepPeriodic；一次性的非周期性任务，看keepDelayed，如果不允许shutdown时保留则要将其从工作队列中移除
+                    // 2. 如果任务t已经被取消了则也要将其从工作队列中移除
+                    if ((t.isPeriodic() ? !keepPeriodic : !keepDelayed) || t.isCancelled()) { // also remove if already cancelled
                         if (q.remove(t)) {
+                            // 移除后，将其cancel取消（如果t.isCancelled()为true，重复cancel也没问题）
                             t.cancel(false);
                         }
                     }
@@ -197,12 +203,15 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
             }
         }
 
+        // 上面的操作可能清空了工作队列，尝试推进线程池状态到终态
         tryTerminate();
     }
 
     public void setExecuteExistingDelayedTasksAfterShutdownPolicy(boolean value) {
         executeExistingDelayedTasksAfterShutdown = value;
-        if (!value && isShutdown()) {
+        if (!value && super.isShutdown()) {
+            // 变更成功，且当前线程池不是RUNNING状态
+            // 尝试onShutdown清理工作队列，进而加速推进线程池到终态
             onShutdown();
         }
     }
@@ -213,7 +222,9 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 
     public void setContinueExistingPeriodicTasksAfterShutdownPolicy(boolean value) {
         continueExistingPeriodicTasksAfterShutdown = value;
-        if (!value && isShutdown()) {
+        if (!value && super.isShutdown()) {
+            // 变更成功，且当前线程池不是RUNNING状态
+            // 尝试onShutdown清理工作队列，进而加速推进线程池到终态
             onShutdown();
         }
     }
