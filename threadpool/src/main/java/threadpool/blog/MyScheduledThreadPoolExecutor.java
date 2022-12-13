@@ -405,6 +405,9 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
                 // 非周期性任务，当做普通的任务直接run就行了
                 MyScheduledFutureTask.super.run();
             } else if (MyScheduledFutureTask.super.runAndReset()) {
+                // 注意：runAndReset如果抛异常了，则不会走reExecutePeriodic逻辑重新加入工作队列，导致这个周期性的任务就不会再被执行了
+                // If any execution of the task encounters an exception, subsequent executions are suppressed
+
                 // 设置下一次执行的事件
                 setNextRunTime();
                 reExecutePeriodic(outerTask);
