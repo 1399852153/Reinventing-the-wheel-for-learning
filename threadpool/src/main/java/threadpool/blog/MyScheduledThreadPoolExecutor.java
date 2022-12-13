@@ -167,6 +167,61 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         }
     }
 
+    /**
+     * 拓展父类线程池在shutdown时执行的钩子函数
+     * */
+    @Override
+    void onShutdown() {
+        BlockingQueue<Runnable> q = super.getQueue();
+        boolean keepDelayed = getExecuteExistingDelayedTasksAfterShutdownPolicy();
+        boolean keepPeriodic = getContinueExistingPeriodicTasksAfterShutdownPolicy();
+        if (!keepDelayed && !keepPeriodic) {
+            for (Object e : q.toArray()) {
+                if (e instanceof RunnableScheduledFuture<?>) {
+                    ((RunnableScheduledFuture<?>) e).cancel(false);
+                }
+            }
+            q.clear();
+        } else {
+            // Traverse snapshot to avoid iterator exceptions
+            for (Object e : q.toArray()) {
+                if (e instanceof RunnableScheduledFuture) {
+                    RunnableScheduledFuture<?> t = (RunnableScheduledFuture<?>)e;
+                    if ((t.isPeriodic() ? !keepPeriodic : !keepDelayed) ||
+                            t.isCancelled()) { // also remove if already cancelled
+                        if (q.remove(t)) {
+                            t.cancel(false);
+                        }
+                    }
+                }
+            }
+        }
+
+        tryTerminate();
+    }
+
+    public void setExecuteExistingDelayedTasksAfterShutdownPolicy(boolean value) {
+        executeExistingDelayedTasksAfterShutdown = value;
+        if (!value && isShutdown()) {
+            onShutdown();
+        }
+    }
+
+    public boolean getExecuteExistingDelayedTasksAfterShutdownPolicy() {
+        return executeExistingDelayedTasksAfterShutdown;
+    }
+
+    public void setContinueExistingPeriodicTasksAfterShutdownPolicy(boolean value) {
+        continueExistingPeriodicTasksAfterShutdown = value;
+        if (!value && isShutdown()) {
+            onShutdown();
+        }
+    }
+
+    public boolean getContinueExistingPeriodicTasksAfterShutdownPolicy() {
+        return continueExistingPeriodicTasksAfterShutdown;
+    }
+
     @Override
     public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
         if (command == null || unit == null) {
