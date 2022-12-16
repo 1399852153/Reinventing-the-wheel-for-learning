@@ -10,8 +10,16 @@ Timer调度器的改进版本ScheduledThreadPoolExecutor在jdk1.5中随着juc包
   与Timer不同的是，ScheduledThreadPoolExecutor作为juc下ThreadPoolExecutor的子类拓展，支持多线程并发的处理提交的调度任务。  
 * 在线程池并发线程数合理且任务执行耗时也合理的情况下，一般不会出现之前被调度的任务阻塞后续任务调度的情况。  
   但反之，如果同一时间内需要调度的任务过多超过了线程池并发的负荷或者某些任务执行时间过长导致工作线程被长时间占用，则ScheduledThreadPoolExecutor无法保证实时的调度。
-## ScheduledThreadPoolExecutor工作原理
-
+#####
+ScheduledThreadPoolExecutor是建立在二叉堆优先级队列和juc的ThreadPoolExecutor基础之上的，如果对两者工作原理不甚了解的话，会严重影响对ScheduledThreadPoolExecutor的理解。
+* 对二叉堆优先级队列原理不太理解的可以参考下我之前的博客：  
+  https://www.cnblogs.com/xiaoxiongcanguan/p/10421560.html （自己动手实现java数据结构（八） 优先级队列）
+* 对juc的ThreadPoolExecutor不太理解的可以参考下我之前的博客：  
+  https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html （jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一））
+  https://www.cnblogs.com/xiaoxiongcanguan/p/16901298.html （jdk线程池ThreadPoolExecutor优雅停止原理解析（自己动手实现线程池）（二））
+## ScheduledThreadPoolExecutor源码分析
+在展开
+1. ScheduledThreadPoolExecutor是如何存储任务的，以保证提交的任务能按照其调度时间
 ### ScheduledThreadPoolExecutor的缺点
 
 ## 总结
