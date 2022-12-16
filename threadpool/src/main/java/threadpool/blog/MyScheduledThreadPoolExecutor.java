@@ -329,8 +329,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         private final long period;
 
         /**
-         * todo 待研究
-         * The actual task to be re-enqueued by reExecutePeriodic
+         * 定期任务实际执行的具体任务
          * */
         RunnableScheduledFuture<V> outerTask = this;
 
@@ -437,10 +436,11 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
         private void setNextRunTime() {
             long p = period;
             if (p > 0) {
-                // fixedRate周期性任务，单纯的加period
+                // fixedRate周期性任务，time基础上单纯的加period就能获得下一次执行的时间
                 // （不用考虑溢出，因为如果因为time太大而溢出了（long类型溢出说明下一次执行时间是天荒地老），则永远不会被执行也是合理的）
                 time += p;
             } else {
+                // fixedDelay周期性任务，下一次时间为当前时间+period（当前调度已经执行完成，fixedDelay任务第n+1的执行时间是第n次执行完成后+period）
                 // 下一次调度的时间（需要处理溢出）
                 time = triggerTime(-p);
             }
