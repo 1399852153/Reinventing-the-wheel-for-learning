@@ -18,8 +18,10 @@ ScheduledThreadPoolExecutor是建立在二叉堆优先级队列和juc的ThreadPo
   https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html （jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一））
   https://www.cnblogs.com/xiaoxiongcanguan/p/16901298.html （jdk线程池ThreadPoolExecutor优雅停止原理解析（自己动手实现线程池）（二））
 ## ScheduledThreadPoolExecutor源码分析
-在展开
-1. ScheduledThreadPoolExecutor是如何存储任务的，以保证提交的任务能按照其调度时间
+在展开分析ScheduledThreadPoolExecutor的源码之前，先思考几个问题。带着问题去阅读源码会更有效率。  
+1. ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
+2. 对于周期性的任务ScheduledThreadPoolExecutor是如何进行调度的?固定频率/固定延迟的周期性任务到底有什么不同？
+3. ScheduledThreadPoolExecutor是如何基于ThreadPoolExecutor来实现多线程并发调度的？
 ### ScheduledThreadPoolExecutor的缺点
-
+相比时间轮（待展开）
 ## 总结
