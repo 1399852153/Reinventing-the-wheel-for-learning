@@ -14,14 +14,601 @@ Timer调度器的改进版本ScheduledThreadPoolExecutor在jdk1.5中随着juc包
 ScheduledThreadPoolExecutor是建立在二叉堆优先级队列和juc的ThreadPoolExecutor基础之上的，如果对两者工作原理不甚了解的话，会严重影响对ScheduledThreadPoolExecutor的理解。
 * 对二叉堆优先级队列原理不太理解的可以参考下我之前的博客：  
   https://www.cnblogs.com/xiaoxiongcanguan/p/10421560.html （自己动手实现java数据结构（八） 优先级队列）
-* 对juc的ThreadPoolExecutor不太理解的可以参考下我之前的博客：  
+* 对juc的ThreadPoolExecutor原理不太理解的可以参考下我之前的博客：  
   https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html （jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一））
   https://www.cnblogs.com/xiaoxiongcanguan/p/16901298.html （jdk线程池ThreadPoolExecutor优雅停止原理解析（自己动手实现线程池）（二））
 ## ScheduledThreadPoolExecutor源码分析
 在展开分析ScheduledThreadPoolExecutor的源码之前，先思考几个问题。带着问题去阅读源码会更有效率。  
-1. ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
-2. 对于周期性的任务ScheduledThreadPoolExecutor是如何进行调度的?固定频率/固定延迟的周期性任务到底有什么不同？
-3. ScheduledThreadPoolExecutor是如何基于ThreadPoolExecutor来实现多线程并发调度的？
+1. ScheduledThreadPoolExecutor是如何基于ThreadPoolExecutor来实现多线程并发调度的？
+2. ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
+3. 对于周期性的任务ScheduledThreadPoolExecutor是如何进行调度的?固定频率/固定延迟的周期性任务到底有什么不同？
+#####
+**为了加深理解和添加注释，我基于jdk的ScheduledThreadPoolExecutor自己重新实现了一遍。所有的类名都在jdk类的基础上加上My后缀，便于区分。**
+### 1.ScheduledThreadPoolExecutor是如何基于ThreadPoolExecutor来实现多线程并发调度的?
+* 我们知道ThreadPoolExecutor线程池中的工作线程会不断尝试从工作队列中拉取任务，并且并发的执行。默认情况下不同任务的优先级是相同的，所以一般的工作队列是先进先出的，即提交的任务先入队因此也最先被执行。  
+* ScheduledThreadPoolExecutor作为一个处理调度任务的线程池作为ThreadPoolExecutor的子类拓展了其实现。不同任务被执行的优先级并不是相同的，而是取决于调度任务提交时所指定的执行时间，即执行时间越早的任务越早出队，越早被工作线程拉取并执行。
+* ScheduledThreadPoolExecutor的构造方法中不允许外部指定工作队列，而是使用一个专供内部使用的、特殊定制的阻塞队列DelayedWorkQueue（和DelayQueue类似，实现细节在下文展开）。
+##### 
+综上所述，ScheduledThreadPoolExecutor作为ThreadPoolExecutor的子类，大量复用了ThreadPoolExecutor中的逻辑，**主要**提供了一个定制化的工作队列外就很巧妙地实现了多线程并发的任务调度功能。
+##### MyScheduledThreadPoolExecutor构造方法以及成员属性（成员属性具体的作用在下文展开）
+```java
+/**
+ * MyScheduledThreadPoolExecutor
+ * */
+public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implements MyScheduledExecutorService {
+
+    /**
+     * 单调自增发号器，为每一个新创建的ScheduledFutureTask设置一个唯一的序列号
+     * */
+    private static final AtomicLong sequencer = new AtomicLong();
+
+    /**
+     * 取消任务时，是否需要将其从延迟队列中移除掉
+     * True if ScheduledFutureTask.cancel should remove from queue
+     * */
+    private volatile boolean removeOnCancel = false;
+
+    /**
+     * False if should cancel/suppress periodic tasks on shutdown.
+     */
+    private volatile boolean continueExistingPeriodicTasksAfterShutdown = false;
+
+    /**
+     * False if should cancel non-periodic tasks on shutdown.
+     */
+    private volatile boolean executeExistingDelayedTasksAfterShutdown = true;
+
+    /**
+     * 比父类ThreadPoolExecutor相对受限的构造函数
+     * */
+    public MyScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory, MyRejectedExecutionHandler handler) {
+        // 1. 只能使用内部的DelayedWorkQueue作为工作队列。
+        //    DelayedWorkQueue是无界队列，只需要指定corePoolSize即可，maximumPoolSize没用(核心线程不够用就全部在队列里积压着等慢慢消费)
+        // 2. corePoolSize决定了ScheduledThreadPoolExecutor处理任务的及时性。核心线程越多处理任务就越及时，越不容易被非常耗时的任务影响调度的实时性，但也越消耗系统资源。
+        // 3. keepAliveTime=0，一般来说核心线程是不应该退出的，除非父类里allowCoreThreadTimeOut被设置为true了
+        //    那样没有任务时核心线程就会立即被回收了(keepAliveTime=0, allowCoreThreadTimeOut=true)
+        super(corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS, new MyDelayedWorkQueue(), threadFactory, handler);
+    }
+}
+```
+### 2.ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
+
+##### MyDelayedWorkQueue实现（删减掉了一些非核心的实现逻辑）
+```java
+/**
+     * 为调度任务线程池ScheduledThreadPoolExecutor专门定制的工作队列
+     * 1.基于完全二叉堆结构，令执行时间最小（最近）的任务始终位于堆顶（即队列头） ==> 小顶堆
+     * 2.实现上综合了juc包下的DelayQueue和PriorityQueue的功能，并加上了一些基于ScheduledThreadPoolExecutor的一些逻辑
+     *   建议读者在理解了PriorityQueue、DelayQueue原理之后再来学习其工作机制，循序渐进而事半功倍
+     * */
+    static class MyDelayedWorkQueue extends AbstractQueue<Runnable> implements BlockingQueue<Runnable> {
+        /**
+         * 完全二叉堆底层数组的初始容量
+         * */
+        private static final int INITIAL_CAPACITY = 16;
+
+        /**
+         * 完全二叉堆底层数组
+         * */
+        private RunnableScheduledFuture<?>[] queue = new RunnableScheduledFuture<?>[INITIAL_CAPACITY];
+
+        /**
+         * 互斥锁，用于入队等操作时的并发控制
+         * */
+        private final ReentrantLock lock = new ReentrantLock();
+
+        /**
+         * 队列中任务元素的数量
+         * */
+        private int size = 0;
+
+        /**
+         * 等待执行队列头（最早应该执行的）任务的线程池工作线程
+         * 为什么会引入一个这个呢？是为了减少其它线程take获取新任务时不必要的等待
+         * 因为额外引入了一个操作系统层面的定时器，await带超时时间比无限时间的await性能要差一些
+         * */
+        private Thread leader = null;
+
+        /**
+         * 当一个队列头部的任务可以被执行时，通知等待在available上的工作线程
+         * */
+        private final Condition available = lock.newCondition();
+
+        // ============================= 内部private的辅助方法 ================================
+        private void setIndex(RunnableScheduledFuture<?> f, int index) {
+            if (f instanceof MyScheduledFutureTask) {
+                // 如果任务对象是MyScheduledFutureTask类型，而不仅仅是RunnableScheduledFuture
+                // 则设置index属性便于加速查找
+                ((MyScheduledFutureTask<?>) f).heapIndex = index;
+            }
+        }
+
+        /**
+         * 第k位的元素在二叉堆中上滤（小顶堆：最小的元素在堆顶）
+         * Call only when holding lock.
+         *
+         * 当新元素插入完全二叉堆时，我们直接将其插入向量末尾(堆底最右侧)，此时新元素的优先级可能会大于其双亲元素甚至祖先元素，破坏了堆序性，
+         * 因此我们需要对插入的新元素进行一次上滤操作，使完全二叉堆恢复堆序性。
+         * 由于堆序性只和双亲和孩子节点相关，因此堆中新插入元素的非祖先元素的堆序性不会受到影响，上滤只是一个局部性的行为。
+         * */
+        private void siftUp(int k, RunnableScheduledFuture<?> key) {
+            while (k > 0) {
+                // 获得第k个节点逻辑上的双亲节点
+                //     0
+                //   1   2
+                //  3 4 5 6
+                // （下标减1再除2，比如下标为5和6的元素逻辑上的parent就是下标为2的元素）
+                int parent = (k - 1) >>> 1;
+
+                // 拿到双亲节点对应的元素
+                RunnableScheduledFuture<?> e = queue[parent];
+                if (key.compareTo(e) >= 0) {
+                    // 如果当前需要上滤的元素key，其值大于或等于双亲节点就停止上滤过程（小顶堆）
+                    break;
+                }
+
+                // 当前上滤的元素key，其值小于双亲节点
+                // 将双亲节点换下来，到第k位上（把自己之前的位置空出来）
+                queue[k] = e;
+                // 设置被换下来的双亲节点的index值
+                setIndex(e, k);
+
+                // 令k下标变为更小的parent，继续尝试下一轮上滤操作
+                k = parent;
+            }
+
+            // 上滤判断结束后，最后空出来的parent的下标值对应的位置由存放上滤的元素key
+            queue[k] = key;
+            // 设置key节点的index值
+            setIndex(key, k);
+        }
+
+        /**
+         * 第k位的元素在二叉堆中下滤（小顶堆：最小的元素在堆顶）
+         * Call only when holding lock.
+         *
+         * 当优先级队列中极值元素出队时，需要在满足堆序性的前提下，选出新的极值元素。
+         * */
+        private void siftDown(int k, RunnableScheduledFuture<?> key) {
+            // half为size的一半
+            int half = size >>> 1;
+            // k小于half才需要下滤，大于half说明第k位元素已经是叶子节点了，不需要继续下滤了
+            while (k < half) {
+                // 获得第k位元素逻辑上的左孩子节点的下标
+                int child = (k << 1) + 1;
+                // 获得左孩子的元素
+                RunnableScheduledFuture<?> c = queue[child];
+                // 获得第k位元素逻辑上的右孩子节点的下标
+                int right = child + 1;
+
+                // right没有越界，则比较左右孩子值的大小
+                if (right < size && c.compareTo(queue[right]) > 0) {
+                    // 左孩子大于右孩子，所以用右孩子和key比较，c=右孩子节点
+                    // （if条件不满足，则用左孩子和key比较，c=左孩子节点）
+                    c = queue[child = right];
+                }
+
+                // key和c比较，如果key比左右孩子都小，则结束下滤
+                if (key.compareTo(c) <= 0) {
+                    break;
+                }
+
+                // key大于左右孩子中更小的那个，则第k位换成更小的那个孩子（保证上层的节点永远小于其左右孩子，保证堆序性）
+                queue[k] = c;
+                // 设置被换到上层去的孩子节点的index的值
+                setIndex(c, k);
+                // 令下标k变大为child，在循环中尝试更下一层的下滤操作
+                k = child;
+            }
+
+            // 结束了下滤操作，最后将元素key放到最后被空出来的孩子节点原来的位置
+            queue[k] = key;
+            // 设置key的index值
+            setIndex(key, k);
+        }
+
+        /**
+         * 二叉堆扩容
+         * Call only when holding lock.
+         */
+        private void grow() {
+            int oldCapacity = queue.length;
+            // 在原有基础上扩容50%
+            int newCapacity = oldCapacity + (oldCapacity >> 1); // grow 50%
+            if (newCapacity < 0) {
+                // 处理扩容50%后整型溢出
+                newCapacity = Integer.MAX_VALUE;
+            }
+            // 将原来数组中的数组数据复制到新数据
+            // 令成员变量queue指向扩容后的新数组
+            queue = Arrays.copyOf(queue, newCapacity);
+        }
+
+        /**
+         * 查询x在二叉堆中的数组下标
+         * @return 找到了就返回具体的下标，没找到返回-1
+         * */
+        private int indexOf(Object x) {
+            if(x == null){
+                // 为空，直接返回-1
+                return -1;
+            }
+
+            if (x instanceof MyScheduledFutureTask) {
+                int i = ((MyScheduledFutureTask) x).heapIndex;
+                // 为什么不直接以x.heapIndex为准?
+                // 因为可能对象x来自其它的线程池，而不是本线程池的
+                // (先判断i是否合法，然后判断第heapIndex个是否就是x)
+                if (i >= 0 && i < size && queue[i] == x) {
+                    // 比对一下第heapIndex项是否就是x，如果是则直接返回
+                    return i;
+                }else{
+                    // heapIndex不合法或者queue[i] != x不相等，说明不是本线程池的任务对象，返回-1
+                    return -1;
+                }
+            } else {
+                // 非ScheduledFutureTask，从头遍历到尾进行线性的检查
+                for (int i = 0; i < size; i++) {
+                    // 如果x和第i个相等，则返回i
+                    if (x.equals(queue[i])) {
+                        return i;
+                    }
+                }
+
+                // 遍历完了整个queue都没找到，返回-1
+                return -1;
+            }
+        }
+
+        // ============================= 实现接口定义的方法 ======================================
+        @Override
+        public boolean contains(Object x) {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 不为-1就是存在，返回true
+                // 反之就是不存在，返回false
+                return indexOf(x) != -1;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public boolean remove(Object x) {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                int i = indexOf(x);
+                if (i < 0) {
+                    // x不存在，直接返回
+                    return false;
+                }
+
+                // x存在，先将其index设置为-1
+                setIndex(queue[i], -1);
+                // 二叉堆元素数量自减1
+                int s = --size;
+
+                // 将队列最尾端的元素取出
+                RunnableScheduledFuture<?> replacement = queue[s];
+                queue[s] = null;
+
+                // s == i,说明被删除的是最尾端的元素，移除后没有破坏堆序性，直接返回即可
+                if (s != i) {
+                    // 将队列最尾端的元素放到被移除元素的位置，进行一次下滤
+                    siftDown(i, replacement);
+                    if (queue[i] == replacement) {
+                        // 这里为什么还要上滤一次呢？其实是最尾端的元素replacement在放到第i个位置上执行下滤后，其虽然保证了小于其左右孩子节点，但依然可能大于其双亲节点
+                        // 举个例子：
+                        //                0
+                        //         10           1
+                        //      20   30      2    3
+                        //    40 50 60 70   4 5  6 7
+                        // 如果删除第3排第一个的20，则siftDown后会变成:
+                        //                0
+                        //         10           1
+                        //      7    30      2    3
+                        //    40 50 60 70   4 5  6
+                        // replacement=7是小于其双亲节点10的，因此需要再进行一次上滤，使得最终结果为：
+                        //                0
+                        //         7           1
+                        //      10   30      2    3
+                        //    40 50 60 70   4 5  6
+                        // 这种需要上滤的情况是相对特殊的，只有当下滤只有这个节点没有动（即下滤后queue[i] == replacement）
+                        // 因为这种情况下replacement不进行上滤的话**可能**小于其双亲节点，而违反了堆序性（heap invariant）
+                        // 而如果下滤后移动了位置（queue[i] != replacement），则其必定大于其双亲节点,因此不需要尝试上滤了
+                        siftUp(i, replacement);
+
+                        // 额外的：
+                        // 最容易理解的实现删除堆中元素的方法是将replacement置于堆顶（即第0个位置），进行一次时间复杂度为O（log n）的完整下滤而恢复堆序性
+                        // 但与ScheduledThreadExecutor在第i个位置上进行下滤操作的算法相比其时间复杂度是更高的
+                        // jdk的实现中即使下滤完成后再进行一次上滤，其**最差情况**也与从堆顶开始下滤的算法的性能一样。虽然难理解一些但却是更高效的堆元素删除算法
+                        // 在remove方法等移除队列中间元素时，会比从堆顶直接下滤效率高
+                    }
+                }
+                return true;
+            } finally {
+                lock.unlock();
+            }
+        }
+        
+        /**
+         * 入队操作
+         * */
+        @Override
+        public boolean offer(Runnable x) {
+            if (x == null) {
+                throw new NullPointerException();
+            }
+
+            RunnableScheduledFuture<?> e = (RunnableScheduledFuture<?>)x;
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                int i = size;
+                if (i >= queue.length) {
+                    // 容量不足，扩容
+                    grow();
+                }
+                size = i + 1;
+                if (i == 0) {
+                    // 队列此前为空，第0位设置就ok了
+                    queue[0] = e;
+                    setIndex(e, 0);
+                } else {
+                    // 队列此前不为空，加入队尾进行一次上滤，恢复堆序性
+                    siftUp(i, e);
+                }
+
+                // 插入堆后，发现自己是队列头（最早要执行的任务）
+                if (queue[0] == e) {
+                    // 已经有新的队列头任务了，leader设置为空
+                    leader = null;
+                    // 通知take时阻塞等待获取新任务的工作线程
+                    available.signal();
+                }
+            } finally {
+                lock.unlock();
+            }
+
+            // 无界队列，入队一定成功
+            return true;
+        }
+
+        /**
+         * 队列元素f出队操作（修改size等数据，并且恢复f移除后的堆序性）
+         * */
+        private RunnableScheduledFuture<?> finishPoll(RunnableScheduledFuture<?> f) {
+            // size自减1
+            int s = --size;
+            RunnableScheduledFuture<?> x = queue[s];
+            queue[s] = null;
+            if (s != 0) {
+                // 由于队列头元素出队了，把队尾元素放到队头进行一次下滤，以恢复堆序性
+                siftDown(0, x);
+            }
+            // 被移除的元素f，index设置为-1
+            setIndex(f, -1);
+
+            // 返回被移除队列的元素
+            return f;
+        }
+
+        /**
+         * 出队操作（非阻塞）
+         * */
+        @Override
+        public RunnableScheduledFuture<?> poll() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                RunnableScheduledFuture<?> first = queue[0];
+                if (first == null || first.getDelay(NANOSECONDS) > 0) {
+                    // 如果队列为空或者队头元素没到需要执行的时间点（delay>0），返回null
+                    return null;
+                } else {
+                    // 返回队列头元素，并且恢复堆序性
+                    return finishPoll(first);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public RunnableScheduledFuture<?> take() throws InterruptedException {
+            final ReentrantLock lock = this.lock;
+            // take是可响应中断的
+            lock.lockInterruptibly();
+            try {
+                for (;;) {
+                    RunnableScheduledFuture<?> first = queue[0];
+                    if (first == null) {
+                        // 队列为空，await等待（可响应中断）
+                        available.await();
+                    } else {
+                        // 队列不为空
+                        long delay = first.getDelay(NANOSECONDS);
+                        if (delay <= 0) {
+                            // 队列头的元素delay<=0，到可执行的时间点了，返回即可
+                            return finishPoll(first);
+                        }
+                        // first设置为null，便于await期间提早gc这个临时变量
+                        first = null; // don't retain ref while waiting
+
+                        if (leader != null){
+                            // leader不为空，说明已经有别的线程在take等待了，await无限等待
+                            // （不带超时时间的await性能更好一些，队列头元素只需要由leader线程来获取就行，其它的线程就等leader处理完队头任务后将其唤醒）
+                            available.await();
+                        } else {
+                            // leader为空，说明之前没有别的线程在take等待
+                            Thread thisThread = Thread.currentThread();
+                            // 令当前线程为leader
+                            leader = thisThread;
+                            try {
+                                // leader await带超时时间（等待队列头的任务delay时间，确保任务可执行时第一时间被唤醒去执行）
+                                available.awaitNanos(delay);
+                            } finally {
+                                if (leader == thisThread) {
+                                    // take方法退出，当前线程不再是leader了
+                                    leader = null;
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if (leader == null && queue[0] != null) {
+                    // leader为空，且队列不为空（比如leader线程被唤醒后，通过finishPoll已经获得了之前的队列头元素）
+                    // 尝试唤醒之前阻塞等待的那些消费者线程
+                    available.signal();
+                }
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public RunnableScheduledFuture<?> poll(long timeout, TimeUnit unit) throws InterruptedException {
+            long nanos = unit.toNanos(timeout);
+            final ReentrantLock lock = this.lock;
+            // pool是可响应中断的
+            lock.lockInterruptibly();
+            try {
+                for (;;) {
+                    RunnableScheduledFuture<?> first = queue[0];
+                    if (first == null) {
+                        // 队列为空
+                        if (nanos <= 0) {
+                            // timeout等待时间超时了，返回null(一般不是第一次循环)
+                            return null;
+                        } else {
+                            // 队列元素为空，等待timeout
+                            nanos = available.awaitNanos(nanos);
+                        }
+                    } else {
+                        // 队列不为空
+                        long delay = first.getDelay(NANOSECONDS);
+                        if (delay <= 0) {
+                            // delay<=0,队头元素满足出队条件
+                            return finishPoll(first);
+                        }
+                        if (nanos <= 0) {
+                            // 队列不为空，但是timeout等待时间超时了，返回null(一般不是第一次循环)
+                            return null;
+                        }
+                        // first设置为null，便于await期间提早gc这个临时变量
+                        first = null; // don't retain ref while waiting
+                        if (nanos < delay || leader != null) {
+                            // poll指定的等待时间小于队头元素delay的时间，或者leader不为空(之前已经有别的线程在等待了捞取任务了)
+                            // 最多等待到timeout
+                            nanos = available.awaitNanos(nanos);
+                        } else {
+                            // 队头元素delay的时间早于waitTime指定的时间，且此前leader为null
+                            // 当前线程成为leader
+                            Thread thisThread = Thread.currentThread();
+                            leader = thisThread;
+                            try {
+                                // 等待delay时间
+                                long timeLeft = available.awaitNanos(delay);
+                                // 醒来后，nanos自减
+                                nanos -= delay - timeLeft;
+                            } finally {
+                                if (leader == thisThread) {
+                                    leader = null;
+                                }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if (leader == null && queue[0] != null) {
+                    // leader为空，且队列不为空（比如leader线程被唤醒后，通过finishPoll已经获得了之前的队列头元素）
+                    // 尝试唤醒之前阻塞等待的那些消费者线程
+                    available.signal();
+                }
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public void clear() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                for (int i = 0; i < size; i++) {
+                    RunnableScheduledFuture<?> t = queue[i];
+                    if (t != null) {
+                        // 将队列内部数组的值全部设置为null
+                        queue[i] = null;
+                        // 所有任务对象的index都设置为-1
+                        setIndex(t, -1);
+                    }
+                }
+                size = 0;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        /**
+         * Returns first element only if it is expired.
+         * Used only by drainTo.  Call only when holding lock.
+         */
+        private RunnableScheduledFuture<?> peekExpired() {
+            RunnableScheduledFuture<?> first = queue[0];
+
+            // 如果队头元素存在，且已到期（expired） 即delay <= 0,返回队头元素，否则返回null
+            return (first == null || first.getDelay(NANOSECONDS) > 0) ? null : first;
+        }
+
+        @Override
+        public int drainTo(Collection<? super Runnable> c) {
+            if (c == null) {
+                throw new NullPointerException();
+            }
+            if (c == this) {
+                throw new IllegalArgumentException();
+            }
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                RunnableScheduledFuture<?> first;
+                int n = 0;
+                // 延迟队列的drainTo只返回已过期的所有元素
+                while ((first = peekExpired()) != null) {
+                    // 已过期的元素加入参数指定的集合
+                    c.add(first);   // In this order, in case add() throws.
+                    // 同时将其从队列中移除
+                    finishPoll(first);
+                    // 总共迁移元素的个数自增
+                    ++n;
+                }
+
+                // 队列为空，或者队列头元素未过期则跳出循环
+                // 返回总共迁移元素的个数
+                return n;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public Object[] toArray() {
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try {
+                // 队列底层本来就是数组，直接copy一份即可
+                return Arrays.copyOf(queue, size, Object[].class);
+            } finally {
+                lock.unlock();
+            }
+        }
+    }
+```
+### 3.对于周期性的任务ScheduledThreadPoolExecutor是如何进行调度的?
+##### 固定频率/固定延迟的周期性任务到底有什么不同？
+
 ### ScheduledThreadPoolExecutor的缺点
 相比时间轮（待展开）
 ## 总结

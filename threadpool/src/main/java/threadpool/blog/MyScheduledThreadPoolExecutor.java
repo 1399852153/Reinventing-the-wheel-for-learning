@@ -38,9 +38,11 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
     private volatile boolean executeExistingDelayedTasksAfterShutdown = true;
 
     public MyScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory, MyRejectedExecutionHandler handler) {
-        // 工作队列DelayedWorkQueue是无界队列，只需要指定corePoolSize即可，maximumPoolSize没用
-        // keepAliveTime=0，一般来说核心线程是不应该退出的，除非父类里allowCoreThreadTimeOut被设置为true了
-        // 那样没有任务时核心线程就会立即被回收了(keepAliveTime=0, allowCoreThreadTimeOut=true)
+        // 1. 只能使用内部的DelayedWorkQueue作为工作队列。
+        //    DelayedWorkQueue是无界队列，只需要指定corePoolSize即可，maximumPoolSize没用(核心线程不够用就全部在队列里积压着等慢慢消费)
+        // 2. corePoolSize决定了ScheduledThreadPoolExecutor处理任务的及时性。核心线程越多处理任务就越及时，越不容易被非常耗时的任务影响调度的实时性，但也越消耗系统资源。
+        // 3. keepAliveTime=0，一般来说核心线程是不应该退出的，除非父类里allowCoreThreadTimeOut被设置为true了
+        //    那样没有任务时核心线程就会立即被回收了(keepAliveTime=0, allowCoreThreadTimeOut=true)
         super(corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS, new MyDelayedWorkQueue(), threadFactory, handler);
     }
 
