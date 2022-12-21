@@ -72,8 +72,147 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 }
 ```
 ### 2.ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
+* DelayedWorkQueue是ScheduledThreadPoolExecutor内部专门定制的工作队列，其实现了BlockingQueue接口，底层基于数组实现的完全二叉堆来存储任务对象。
+* 队列存储的任务对象也是ScheduledThreadPoolExecutor中专门定制的ScheduledFutureTask类，其中包含了一个关键成员属性time，标识着该任务应该被何时调度的绝对时间戳(单位nanos)
+  同时其compareTo方法中，保证被调度时间越早的任务其比较时值就越小。如果time完全一样的话则基于全局发号器分配的序列号进行比较，序列号越小的说明越早入队则排在队列的前面。
+##### MyScheduledFutureTask实现（省略了一些与当前内容无关的逻辑）
+```java
+/**
+     * 调度任务对象
+     * */
+    private class MyScheduledFutureTask<V> extends FutureTask<V> implements RunnableScheduledFuture<V>{
 
-##### MyDelayedWorkQueue实现（删减掉了一些非核心的实现逻辑）
+        /**
+         * 用于保证相同延迟时间的任务，其FIFO（先提交的先执行）的特性
+         * */
+        private final long sequenceNumber;
+
+        /**
+         * 当前任务下一次执行的时间(绝对时间，单位纳秒nanos)
+         * */
+        private long time;
+
+        /**
+         * 需要重复执行的任务使用的属性
+         * 1 period>0,说明该任务是一个固定周期重复执行的任务（通过scheduleAtFixedRate方法提交）
+         * 2 period<0，说明该任务是一个固定延迟重复执行的任务（通过scheduleWithFixedDelay方法提交）
+         * 3 period=0，说明该任务是一个一次性执行的任务（通过schedule方法提交）
+         * */
+        private final long period;
+
+        /**
+         * 定期任务实际执行的具体任务
+         * */
+        RunnableScheduledFuture<V> outerTask = this;
+
+        /**
+         * 基于二叉堆的延迟队列中的数组下标，用于快速的查找、定位
+         * */
+        int heapIndex;
+
+        /**
+         * 一次性任务的构造函数（one action）
+         * */
+        MyScheduledFutureTask(Runnable runnable, V result, long ns) {
+            super(runnable, result);
+            // 下一次执行的时间
+            this.time = ns;
+            // 非周期性任务，period设置为0
+            this.period = 0;
+            this.sequenceNumber = sequencer.getAndIncrement();
+        }
+
+        /**
+         * 周期性任务的构造函数
+         */
+        MyScheduledFutureTask(Runnable runnable, V result, long ns, long period) {
+            super(runnable, result);
+            // 下一次执行的时间
+            this.time = ns;
+            this.period = period;
+            this.sequenceNumber = sequencer.getAndIncrement();
+        }
+
+        @Override
+        public boolean isPeriodic() {
+            // period为0代表是一次性任务
+            // period部位0代表是周期性任务
+            return period != 0;
+        }
+
+        /**
+         * 获得下一次执行的时间
+         * */
+        @Override
+        public long getDelay(TimeUnit unit) {
+            // 获得time属性与当前时间之差
+            long delay = time - System.nanoTime();
+
+            // 基于参数unit转换
+            return unit.convert(delay, NANOSECONDS);
+        }
+
+        /**
+         * 用于延迟队列中的优先级队列的大小比较
+         * 基于time比较
+         * 1. time越小，值越大（越早应该被调度执行的任务，越靠前）
+         * 2. time相等就进一步比较sequenceNumber（调度时间一致的）
+         * */
+        @Override
+        public int compareTo(Delayed other) {
+            if (other == this) {
+                // 同一个对象是相等的，返回0
+                return 0;
+            }
+
+            if (other instanceof MyScheduledFutureTask) {
+                // 同样是ScheduledFutureTask
+                MyScheduledFutureTask<?> x = (MyScheduledFutureTask<?>)other;
+                long diff = time - x.time;
+                if (diff < 0) {
+                    // 当前对象延迟时间更小，返回-1
+                    return -1;
+                } else if (diff > 0) {
+                    // 当前对象延迟时间更大，返回1
+                    return 1;
+                } else if (sequenceNumber < x.sequenceNumber) {
+                    // 延迟时间相等，比较序列号
+
+                    // 当前对象序列号更小，需要排更前面返回-1
+                    return -1;
+                } else {
+                    // 当前对象序列号更大，返回1
+                    return 1;
+                }
+            }else{
+                // 不是ScheduledFutureTask，通过getDelay比较延迟时间
+                long diff = getDelay(NANOSECONDS) - other.getDelay(NANOSECONDS);
+
+                // return (diff < 0) ? -1 : (diff > 0) ? 1 : 0
+                if(diff < 0){
+                    // 当前对象延迟时间小，返回-1
+                    return -1;
+                }else if(diff > 0){
+                    // 当前对象延迟时间大，返回1
+                    return 1;
+                }else{
+                    // 延迟时间相等返回0
+                    return 0;
+                }
+            }
+        }
+    }
+```
+* 完全二叉堆中的所有元素存储时保持全局的堆序性，这样当前被调度时间最早的的任务就能放在DelayedWorkQueue的队列头中，最先被工作线程take/poll时获取到。
+* DelayedWorkQueue顾名思义本质上还是一个DelayQueue延时队列，延时队列一定是阻塞队列。而其由两个最显著的特点：
+  1. 所存储的元素都实现了java.util.concurrent.Delayed接口，按照getDelay获得到的延迟时间的大小排序，值越小的在队列中越靠前（前面已经提到这个是基于完全二叉堆实现的）
+  2. 在有消费者需要获取队头元素时，即使队列不为空但队头元素getDelay>0时，也不会返回队头元素而是被当做空队列来对待。如果是阻塞等待的话，则在队列头元素getDelay<=0时再唤醒阻塞等待的消费者。
+  **上面延迟队列的第二个特点保证了ScheduledThreadPoolExecutor中的工作线程既不会在不正确的时间过早的对任务进行调度，也不会在当前时间未满足任务调度条件下空转而节约CPU(因为工作线程会被阻塞)**
+* DelayedWorkQueue中有一把全局锁（成员变量ReentrantLock lock），绝大多数操作都必须在锁的保护下才能进行。目的是为了避免提交任务入队、消费任务出队等等对操作时出现并发而引起bug。
+#####
+**DelayedWorkQueue的实现机制基本上等价于juc包下的PriorityQueue加DelayQueue。如果可以的话建议读者在理解了PriorityQueue、DelayQueue原理之后再来学习其工作机制，循序渐进而事半功倍。**    
+**很多实现的小细节都在MyDelayedWorkQueue中有详细的注释（比如二叉堆的插入、删除，以及延迟队列中getDelay值更小的任务入队时应该怎么处理等）。**
+##### MyDelayedWorkQueue实现（删减掉了一些非核心的逻辑）
 ```java
 /**
      * 为调度任务线程池ScheduledThreadPoolExecutor专门定制的工作队列
@@ -157,7 +296,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
                 k = parent;
             }
 
-            // 上滤判断结束后，最后空出来的parent的下标值对应的位置由存放上滤的元素key
+            // 上滤判断结束后，最后空出来的parent的下标值对应的位置存放上滤的元素key
             queue[k] = key;
             // 设置key节点的index值
             setIndex(key, k);

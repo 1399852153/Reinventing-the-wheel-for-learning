@@ -565,7 +565,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
                 k = parent;
             }
 
-            // 上滤判断结束后，最后空出来的parent的下标值对应的位置由存放上滤的元素key
+            // 上滤判断结束后，最后空出来的parent的下标值对应的位置存放上滤的元素key
             queue[k] = key;
             // 设置key节点的index值
             setIndex(key, k);
