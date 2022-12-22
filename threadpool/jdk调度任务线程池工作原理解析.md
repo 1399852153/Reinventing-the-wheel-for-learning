@@ -1,15 +1,15 @@
-#jdk调度任务线程池ScheduledThreadPoolExecutor工作原理解析
+# jdk调度任务线程池ScheduledThreadPoolExecutor工作原理解析
 在日常开发中存在着调度延时任务、定时任务的需求，而jdk中提供了两种基于内存的任务调度工具，即相对早期的java.util.Timer类和java.util.concurrent中的ScheduledThreadPoolExecutor。  
-#####Timer介绍
-Timer类其底层基于二叉堆实现的优先级队列，使得当前最早应该被执行的任务始终保持在队列头，并能以O(log n)对数复杂度完成任务的入队和出队。  
-Timer是比较早被引入jdk的，其只支持单线程处理任务，因此如果先被处理的任务比较耗时便会阻塞后续任务的执行，进而导致任务调度不够及时（比如本来10分钟后要执行的任务，被拖延到30分钟后才执行）  
-#####ScheduledThreadPoolExecutor介绍
+##### Timer介绍
+Timer类其底层基于完全二叉堆实现的优先级队列，使得当前最早应该被执行的任务始终保持在队列头，并能以O(log n)对数的时间复杂度完成任务的入队和出队。  
+Timer是比较早被引入jdk的，其只支持单线程处理任务，因此如果先被处理的任务比较耗时便会阻塞后续任务的执行，进而导致任务调度不够及时（比如本来10分钟后要执行的任务，可能被前一个耗时的任务拖延到15分钟后才执行）  
+##### ScheduledThreadPoolExecutor介绍
 Timer调度器的改进版本ScheduledThreadPoolExecutor在jdk1.5中随着juc包一起被引入。   
 * ScheduledThreadPoolExecutor能够支持调度一次性的延迟任务，和固定频率/固定延迟的定时任务（这两种定时任务的具体区别会在下文展开）
-* ScheduledThreadPoolExecutor其底层同样基于二叉堆实现的优先级队列来存储任务的，能做到对数时间复杂度的任务入队和出队
+* ScheduledThreadPoolExecutor其底层同样基于二叉堆实现的优先级队列来存储任务的，能做到对数时间复杂度的任务入队和出队。  
   与Timer不同的是，ScheduledThreadPoolExecutor作为juc下ThreadPoolExecutor的子类拓展，支持多线程并发的处理提交的调度任务。  
 * 在线程池并发线程数合理且任务执行耗时也合理的情况下，一般不会出现之前被调度的任务阻塞后续任务调度的情况。  
-  但反之，如果同一时间内需要调度的任务过多超过了线程池并发的负荷或者某些任务执行时间过长导致工作线程被长时间占用，则ScheduledThreadPoolExecutor无法保证实时的调度。
+  但反之，如果同一时间内需要调度的任务过多超过了线程池并发的负荷或者某些任务执行时间过长导致工作线程被长时间占用，则ScheduledThreadPoolExecutor依然无法保证实时的调度。
 #####
 ScheduledThreadPoolExecutor是建立在二叉堆优先级队列和juc的ThreadPoolExecutor基础之上的，如果对两者工作原理不甚了解的话，会严重影响对ScheduledThreadPoolExecutor的理解。
 * 对二叉堆优先级队列原理不太理解的可以参考下我之前的博客：  
@@ -25,8 +25,8 @@ ScheduledThreadPoolExecutor是建立在二叉堆优先级队列和juc的ThreadPo
 #####
 **为了加深理解和添加注释，我基于jdk的ScheduledThreadPoolExecutor自己重新实现了一遍。所有的类名都在jdk类的基础上加上My后缀，便于区分。**
 ### 1.ScheduledThreadPoolExecutor是如何基于ThreadPoolExecutor来实现多线程并发调度的?
-* 我们知道ThreadPoolExecutor线程池中的工作线程会不断尝试从工作队列中拉取任务，并且并发的执行。默认情况下不同任务的优先级是相同的，所以一般的工作队列是先进先出的，即提交的任务先入队因此也最先被执行。  
-* ScheduledThreadPoolExecutor作为一个处理调度任务的线程池作为ThreadPoolExecutor的子类拓展了其实现。不同任务被执行的优先级并不是相同的，而是取决于调度任务提交时所指定的执行时间，即执行时间越早的任务越早出队，越早被工作线程拉取并执行。
+* 我们知道ThreadPoolExecutor线程池中的工作线程会不断尝试从工作队列中拉取任务，并且并发的执行。默认情况下不同任务的优先级是相同的，所以一般的工作队列是先进先出的，即更早提交的任务先入队因而也先被执行。  
+* ScheduledThreadPoolExecutor作为一个处理调度任务的线程池作为ThreadPoolExecutor的子类拓展了其实现。其中不同任务被执行的优先级并不是基于提交时间的，而是取决于调度任务提交时所指定的执行时间，即执行时间越早的任务越早出队，越早被工作线程拉取并执行。
 * ScheduledThreadPoolExecutor的构造方法中不允许外部指定工作队列，而是使用一个专供内部使用的、特殊定制的阻塞队列DelayedWorkQueue（和DelayQueue类似，实现细节在下文展开）。
 ##### 
 综上所述，ScheduledThreadPoolExecutor作为ThreadPoolExecutor的子类，大量复用了ThreadPoolExecutor中的逻辑，**主要**提供了一个定制化的工作队列外就很巧妙地实现了多线程并发的任务调度功能。
@@ -73,7 +73,7 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
 ```
 ### 2.ScheduledThreadPoolExecutor是如何存储任务的，以高效的保证提交的任务能按照其调度时间的先后准确的被依次调度？
 * DelayedWorkQueue是ScheduledThreadPoolExecutor内部专门定制的工作队列，其实现了BlockingQueue接口，底层基于数组实现的完全二叉堆来存储任务对象。
-* 队列存储的任务对象也是ScheduledThreadPoolExecutor中专门定制的ScheduledFutureTask类，其中包含了一个关键成员属性time，标识着该任务应该被何时调度的绝对时间戳(单位nanos)
+* 队列存储的任务对象也是ScheduledThreadPoolExecutor中专门定制的ScheduledFutureTask类，其中包含了一个关键成员属性time，标识着该任务应该被何时调度的绝对时间戳(单位nanos)。  
   同时其compareTo方法中，保证被调度时间越早的任务其比较时值就越小。如果time完全一样的话则基于全局发号器分配的序列号进行比较，序列号越小的说明越早入队则排在队列的前面。
 ##### MyScheduledFutureTask实现（省略了一些与当前内容无关的逻辑）
 ```java
@@ -204,11 +204,11 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
     }
 ```
 * 完全二叉堆中的所有元素存储时保持全局的堆序性，这样当前被调度时间最早的的任务就能放在DelayedWorkQueue的队列头中，最先被工作线程take/poll时获取到。
-* DelayedWorkQueue顾名思义本质上还是一个DelayQueue延时队列，延时队列一定是阻塞队列。而其由两个最显著的特点：
+* DelayedWorkQueue顾名思义，本质上还是一个DelayQueue延时队列，而延时队列一定是阻塞队列。延时队列与一般的阻塞队列相比有两个最重要的区别：
   1. 所存储的元素都实现了java.util.concurrent.Delayed接口，按照getDelay获得到的延迟时间的大小排序，值越小的在队列中越靠前（前面已经提到这个是基于完全二叉堆实现的）
-  2. 在有消费者需要获取队头元素时，即使队列不为空但队头元素getDelay>0时，也不会返回队头元素而是被当做空队列来对待。如果是阻塞等待的话，则在队列头元素getDelay<=0时再唤醒阻塞等待的消费者。
+  2. 在有消费者需要获取队头元素时，即使队列不为空但队头元素getDelay>0时也不会返回队头元素，而是被当做空队列来对待。如果是阻塞等待的话，则在队列头元素getDelay<=0时再唤醒阻塞等待的消费者。  
   **上面延迟队列的第二个特点保证了ScheduledThreadPoolExecutor中的工作线程既不会在不正确的时间过早的对任务进行调度，也不会在当前时间未满足任务调度条件下空转而节约CPU(因为工作线程会被阻塞)**
-* DelayedWorkQueue中有一把全局锁（成员变量ReentrantLock lock），绝大多数操作都必须在锁的保护下才能进行。目的是为了避免提交任务入队、消费任务出队等等对操作时出现并发而引起bug。
+* DelayedWorkQueue中有一把全局锁（成员变量ReentrantLock lock），绝大多数操作都必须在锁的保护下才能进行。目的是为了避免提交任务入队、消费任务出队等操作时出现并发而引起bug。
 #####
 **DelayedWorkQueue的实现机制基本上等价于juc包下的PriorityQueue加DelayQueue。如果可以的话建议读者在理解了PriorityQueue、DelayQueue原理之后再来学习其工作机制，循序渐进而事半功倍。**    
 **很多实现的小细节都在MyDelayedWorkQueue中有详细的注释（比如二叉堆的插入、删除，以及延迟队列中getDelay值更小的任务入队时应该怎么处理等）。**
@@ -993,8 +993,16 @@ ScheduledThreadPoolExecutor允许用户提供三种不同类型的任务：
 * 需要特别注意的是，当周期性任务的run方法中的ScheduledFutureTask.super.runAndReset()出现异常时，run方法会直接抛出异常而退出，
   并不会执行后续的reExecutePeriodic重新入队操作，导致无声无息的中止了后续的周期性调度流程。   
   If any execution of the task encounters an exception, subsequent executions are suppressed
-* **因此用户自己的业务逻辑中只有在需要中断后续调度时才应该抛出异常,否则将会出现意想不到的后果。**  
-  我就踩过坑，使用ScheduledThreadPoolExecutor周期性的向DB注册心跳时忘记catch异常，导致网络波动导致DB访问异常时节点的心跳续期也断了
+* **因此用户自己的业务逻辑中只有在需要中断后续调度时才应该抛出异常,否则将会出现意想不到的问题。**  
+  我就踩过坑，使用ScheduledThreadPoolExecutor周期性的向DB注册心跳时忘记catch异常，导致网络波动使得DB访问异常时节点的心跳续期也断了
 ### ScheduledThreadPoolExecutor的缺点
-相比时间轮（待展开）
+ScheduledThreadPoolExecutor作为一个单机纯内存的延时/定时任务调度框架能够很好的应对日常开发中出现的多数需求，但其还是存在着一些缺陷。
+#####
+* 从功能上来说，纯内存的设计使得调度任务没有持久化的功能，在服务宕机等极端情况下会丢失掉已经提交的任务；同时也缺乏集群内跨机器节点的分布式负载均衡的能力。
+* 从性能上来说，ScheduledThreadPoolExecutor是基于完全二叉堆的，能以O(log n)对数的时间复杂度进行任务的入队/出队，且使用了一个全局的互斥锁来防止并发，因此其高并发场景下的吞吐量并不高。  
+  而时间轮则能够在牺牲一定调度精度的前提下，将调度任务的入队/出队的时间复杂度降低至常数复杂度。在每秒有成百上千的任务被频繁提交/调度执行的场景下，时间轮的表现要远远优于ScheduledThreadPoolExecutor。   
+  因此时间轮在kafka、netty等常见的中间件、框架中都使用时间轮而不是jdk的ScheduledThreadPoolExecutor来实现任务调度。
 ## 总结
+* 本篇博客从源码的角度详细分析了jdk调度线程池ScheduledThreadPoolExecutor的工作原理。其中重点介绍了其是如何基于ThreadPoolExecutor实现多线程任务调度的，并从源码的角度分析了其存储任务、调度任务的一些细节（博客中只分析了比较核心的逻辑，有些旁路逻辑被省略了）。  
+* 在博客中还引入了同样用于任务调度的时间轮算法与之进行简单的比较（关于时间轮算法工作原理解析的博客会在后续发布）。
+* 本篇博客的完整代码在我的github上：https://github.com/1399852153/Reinventing-the-wheel-for-learning （ThreadPool模块 MyScheduledThreadPoolExecutor类） 内容如有错误，还请多多指教。
