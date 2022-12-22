@@ -994,7 +994,7 @@ ScheduledThreadPoolExecutor允许用户提供三种不同类型的任务：
   并不会执行后续的reExecutePeriodic重新入队操作，导致无声无息的中止了后续的周期性调度流程。   
   If any execution of the task encounters an exception, subsequent executions are suppressed
 * **因此用户自己的业务逻辑中只有在需要中断后续调度时才应该抛出异常,否则将会出现意想不到的问题。**  
-  我就踩过坑，使用ScheduledThreadPoolExecutor周期性的向DB注册心跳时忘记catch异常，导致网络波动使得DB访问异常时节点的心跳续期也断了
+  我曾经就踩过坑，使用ScheduledThreadPoolExecutor周期性的向DB注册心跳时忘记catch异常，导致网络波动使得DB访问异常时节点的心跳续期也断了
 ### ScheduledThreadPoolExecutor的缺点
 ScheduledThreadPoolExecutor作为一个单机纯内存的延时/定时任务调度框架能够很好的应对日常开发中出现的多数需求，但其还是存在着一些缺陷。
 #####
