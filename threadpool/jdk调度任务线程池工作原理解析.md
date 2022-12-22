@@ -746,8 +746,255 @@ public class MyScheduledThreadPoolExecutor extends MyThreadPoolExecutorV2 implem
     }
 ```
 ### 3.对于周期性的任务ScheduledThreadPoolExecutor是如何进行调度的?
-##### 固定频率/固定延迟的周期性任务到底有什么不同？
+ScheduledThreadPoolExecutor允许用户提供三种不同类型的任务：
+1. 只需要调度一次的一次性延迟任务（通过schedule方法提交, 创建的任务对象period=0）
+2. 需要周期性调度的固定频率的任务（通过scheduleAtFixedRate方法提交，创建的任务对象period>0）
+3. 需要周期性调度的固定延迟的任务（通过scheduleWithFixedDelay方法提交，创建的任务对象period<0）
+```java
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+        if (command == null || unit == null) {
+            throw new NullPointerException();
+        }
 
+        // 装饰任务对象
+        RunnableScheduledFuture<?> t = decorateTask(command,
+                new MyScheduledFutureTask<Void>(command, null, triggerTime(delay, unit)));
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
+    }
+
+    @Override
+    public ScheduledFuture<?> scheduleAtFixedRate(Runnable command, long initialDelay, long period, TimeUnit unit) {
+        if (command == null || unit == null) {
+            throw new NullPointerException();
+        }
+        if (period <= 0) {
+            throw new IllegalArgumentException();
+        }
+
+        // 固定周期重复执行的任务，period参数为正数
+        MyScheduledFutureTask<Void> scheduledFutureTask = new MyScheduledFutureTask<>(
+                command, null, triggerTime(initialDelay, unit), unit.toNanos(period));
+
+        // 装饰任务对象
+        RunnableScheduledFuture<Void> t = decorateTask(command, scheduledFutureTask);
+
+        // 记录用户实际提交的任务对象
+        scheduledFutureTask.outerTask = t;
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
+    }
+
+    @Override
+    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit) {
+        if (command == null || unit == null)
+            throw new NullPointerException();
+        if (delay <= 0)
+            throw new IllegalArgumentException();
+
+        // 固定延迟重复执行的任务,period参数为负数
+        MyScheduledFutureTask<Void> scheduledFutureTask =
+                new MyScheduledFutureTask<>(command, null, triggerTime(initialDelay, unit), unit.toNanos(-delay));
+
+        // 装饰任务对象
+        RunnableScheduledFuture<Void> t = decorateTask(command, scheduledFutureTask);
+
+        // 记录用户实际提交的任务对象
+        scheduledFutureTask.outerTask = t;
+
+        // 提交任务到工作队列中，以令工作线程满足条件时将其取出来调度执行
+        delayedExecute(t);
+
+        return t;
+    }
+```
+```java
+    private void delayedExecute(RunnableScheduledFuture<?> task) {
+        if (isShutdown()) {
+            // 线程池已经终止了，执行reject拒绝策略
+            super.reject(task);
+        } else {
+            // 没有终止，任务在工作队列中入队
+            super.getQueue().add(task);
+            // 再次检查状态，如果线程池已经终止则回滚（将任务对象从工作队列中remove掉，并且当前任务Future执行cancel方法取消掉）
+            // 在提交任务与线程池终止并发时，推进线程池尽早到达终结态
+            if (isShutdown() && !canRunInCurrentRunState(task.isPeriodic()) && remove(task)) {
+                task.cancel(false);
+            } else {
+                // 确保至少有一个工作线程会处理当前提交的任务
+                ensurePrestart();
+            }
+        }
+    }
+```
+#####
+第一种一次性的延迟任务的调度在前面的章节已经说的比较清楚了，就是简单的将任务加入定制的工作队列，等待线程池中的工作线程在任务调度时间达到要求时令任务出队并调度执行即可。  
+下面我们看看需要反复被调度的周期性任务是如何被调度的,重点关注之前没有展示的ScheduledFutureTask任务对象的run方法。
+* 可以看到在任务对象的run方法中，如果是period为0的一次性任务，只需要简单的调用run方法即可。
+* 而对于period不为0的周期性任务，首先需要通过runAndReset方法执行当前的调度操作，在操作结束之后通过setNextRunTime方法计算并设置当前周期性任务下一次要被调度的时间，
+  然后通过reExecutePeriodic方法将任务重新加入工作队列中，这样就能在对应的时间再被工作线程消费到并且调度执行了。如此循环往复则可以一直将周期性的调度任务运行下去。
+##### 任务对象调度相关逻辑
+```java
+    /**
+     * 调度任务对象
+     * */
+    private class MyScheduledFutureTask<V> extends FutureTask<V> implements RunnableScheduledFuture<V>{
+
+        /**
+         * 用于保证相同延迟时间的任务，其FIFO（先提交的先执行）的特性
+         * */
+        private final long sequenceNumber;
+
+        /**
+         * 当前任务下一次执行的时间(绝对时间，单位纳秒nanos)
+         * */
+        private long time;
+
+        /**
+         * 需要重复执行的任务使用的属性
+         * 1 period>0,说明该任务是一个固定周期重复执行的任务（通过scheduleAtFixedRate方法提交）
+         * 2 period<0，说明该任务是一个固定延迟重复执行的任务（通过scheduleWithFixedDelay方法提交）
+         * 3 period=0，说明该任务是一个一次性执行的任务（通过schedule方法提交）
+         * */
+        private final long period;
+
+        /**
+         * 定期任务实际执行的具体任务
+         * */
+        RunnableScheduledFuture<V> outerTask = this;
+
+        /**
+         * 基于二叉堆的延迟队列中的数组下标，用于快速的查找、定位
+         * */
+        int heapIndex;
+
+        /**
+         * 一次性任务的构造函数（one action）
+         * */
+        MyScheduledFutureTask(Runnable runnable, V result, long ns) {
+            super(runnable, result);
+            // 下一次执行的时间
+            this.time = ns;
+            // 非周期性任务，period设置为0
+            this.period = 0;
+            this.sequenceNumber = sequencer.getAndIncrement();
+        }
+      
+        /**
+         * 周期性任务的构造函数
+         */
+        MyScheduledFutureTask(Runnable runnable, V result, long ns, long period) {
+            super(runnable, result);
+            // 下一次执行的时间
+            this.time = ns;
+            this.period = period;
+            this.sequenceNumber = sequencer.getAndIncrement();
+        }
+        
+        /**
+         * 设置下一次执行的事件
+         * */
+        private void setNextRunTime() {
+            long p = this.period;
+            if (p > 0) {
+                // fixedRate周期性任务，time基础上单纯的加period就能获得下一次执行的时间
+                // （不用考虑溢出，因为如果因为time太大而溢出了（long类型溢出说明下一次执行时间是天荒地老），则永远不会被执行也是合理的）
+                this.time += p;
+            } else {
+                // fixedDelay周期性任务，下一次时间为当前时间+period（当前调度已经执行完成，fixedDelay任务第n+1的执行时间是第n次执行完成后+period）
+                // 下一次调度的时间（需要处理溢出）
+                this.time = triggerTime(-p);
+            }
+        }
+
+        @Override
+        public void run() {
+            boolean periodic = isPeriodic();
+            // 根据当前线程池状态，判断当前任务是否应该取消(比如已经是STOP了，就应该停止继续运行了)
+            if (!canRunInCurrentRunState(periodic)) {
+                // 不能正常运行，取消掉
+                cancel(false);
+            } else if (!periodic) {
+                // 非周期性任务，当做普通的任务直接run就行了
+                MyScheduledFutureTask.super.run();
+            } else if (MyScheduledFutureTask.super.runAndReset()) {
+                // 注意：runAndReset如果抛异常了，则不会走reExecutePeriodic逻辑重新加入工作队列，导致这个周期性的任务就不会再被执行了
+                // If any execution of the task encounters an exception, subsequent executions are suppressed
+
+                // 设置下一次执行的事件
+                setNextRunTime();
+                reExecutePeriodic(outerTask);
+            }
+        }
+    }
+```
+```java
+    /**
+     * 尝试重新提交并执行周期性任务(是属于ScheduledThreadPoolExecutor的方法)
+     * */
+    void reExecutePeriodic(RunnableScheduledFuture<?> task) {
+        if (canRunInCurrentRunState(true)) {
+            // 当前线程池状态允许执行任务，将任务加入到工作队列中去
+            super.getQueue().add(task);
+            // 再次检查，如果状态发生了变化，不允许了，则通过remove方法将刚加入的任务移除掉，实现回滚
+            // 和ThreadPoolExecutor一致都是为了让shutdown/stop状态的线程池尽量在状态变更和提交新任务出现并发时，不要去执行新任务尽早终止线程池
+            if (!canRunInCurrentRunState(true) && super.remove(task)) {
+                task.cancel(false);
+            } else {
+                // 确保至少有一个工作线程会处理当前提交的任务
+                super.ensurePrestart();
+            }
+        }
+    }
+```
+```java
+    /**
+     * Returns current nanosecond time.
+     */
+    final long now() {
+        return System.nanoTime();
+    }
+
+    /**
+     * 获得下一次调度的绝对时间
+     * */
+    private long triggerTime(long delay, TimeUnit unit) {
+        // 统一转成nanos级别计算
+        return triggerTime(unit.toNanos((delay < 0) ? 0 : delay));
+    }
+
+    /**
+     * 获得下一次调度的绝对时间
+     * @param delay 延迟时间（单位nanos）
+     */
+    long triggerTime(long delay) {
+        if(delay < (Long.MAX_VALUE >> 1)){
+            // delay小于Long.MAX_VALUE/2，肯定不会发生compareTo时的溢出问题，直接正常累加delay即可
+            return now() + delay;
+        }else{
+            // delay大于Long.MAX_VALUE/2，可能会发生compareTo时的溢出问题，在overflowFree检查并做必要的修正
+            return now() + overflowFree(delay);
+        }
+    }
+```
+##### 固定频率/固定延迟的周期性任务到底有什么不同？
+固定频率和固定延迟的周期性任务最大的区别就在于setNextRunTime方法中对于下一次调度时间计算的方式不同
+* 提交任务时的period周期参数指定了每次调度的间隔时间，但在不同场景下的语义不同
+* fixedRate周期性任务，time基础上单纯的加period就能获得下一次执行的时间
+* fixedDelay周期性任务，下一次时间为当前时间+period（当前调度已经执行完成，fixedDelay任务第n+1的执行时间是第n次执行完成后+period）
+##### 周期性任务执行时出现异常会抑制后续的调度
+* 需要特别注意的是，当周期性任务的run方法中的ScheduledFutureTask.super.runAndReset()出现异常时，run方法会直接抛出异常而退出，
+  并不会执行后续的reExecutePeriodic重新入队操作，导致无声无息的中止了后续的周期性调度流程。   
+  If any execution of the task encounters an exception, subsequent executions are suppressed
+* **因此用户自己的业务逻辑中只有在需要中断后续调度时才应该抛出异常,否则将会出现意想不到的后果。**  
+  我就踩过坑，使用ScheduledThreadPoolExecutor周期性的向DB注册心跳时忘记catch异常，导致网络波动导致DB访问异常时节点的心跳续期也断了
 ### ScheduledThreadPoolExecutor的缺点
 相比时间轮（待展开）
 ## 总结
