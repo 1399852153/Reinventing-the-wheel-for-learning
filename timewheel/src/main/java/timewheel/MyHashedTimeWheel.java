@@ -94,7 +94,7 @@ public class MyHashedTimeWheel {
             while (true){
                 // 等待perTick
                 waitForNextTick();
-                System.out.println("waitForNextTick：" + new Date());
+//                System.out.println("waitForNextTick：" + new Date());
 
                 // 在捞取当前tick下需要处理的bucket前，先将加入到队列中的任务转移到环形数组中(可能包含在当前tick下就要处理的任务)
                 transferTaskToBuckets();
@@ -120,10 +120,10 @@ public class MyHashedTimeWheel {
                             + MyHashedTimeWheel.this.startTime;
 
             long needSleepTime = nextTickTime - System.nanoTime();
-
+//            System.out.println("waitForNextTick needSleepTime=" + TimeUnit.NANOSECONDS.toMillis(needSleepTime));
             try {
                 // 比起netty，忽略了一些处理特殊场景bug的逻辑
-                Thread.sleep(needSleepTime);
+                Thread.sleep(TimeUnit.NANOSECONDS.toMillis(needSleepTime));
             } catch (InterruptedException ignored) {
 
             }
