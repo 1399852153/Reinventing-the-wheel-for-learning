@@ -1,11 +1,13 @@
 package timewheel;
 
-import java.util.Date;
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 参考netty实现的单层时间轮
+ * */
 public class MyHashedTimeWheel {
 
     /**
@@ -94,7 +96,6 @@ public class MyHashedTimeWheel {
             while (true){
                 // 等待perTick
                 waitForNextTick();
-//                System.out.println("waitForNextTick：" + new Date());
 
                 // 在捞取当前tick下需要处理的bucket前，先将加入到队列中的任务转移到环形数组中(可能包含在当前tick下就要处理的任务)
                 transferTaskToBuckets();
@@ -119,11 +120,13 @@ public class MyHashedTimeWheel {
             long nextTickTime = (MyHashedTimeWheel.this.totalTick + 1) * MyHashedTimeWheel.this.perTickTime
                             + MyHashedTimeWheel.this.startTime;
 
-            long needSleepTime = nextTickTime - System.nanoTime();
-//            System.out.println("waitForNextTick needSleepTime=" + TimeUnit.NANOSECONDS.toMillis(needSleepTime));
+            // 因为nextTickTime是纳秒，sleep需要的是毫秒，需要保证纳秒数过小时，导致直接计算出来的毫秒数为0
+            // 因此(‘实际休眠的纳秒数’+999999)/1000000,保证了纳秒转毫秒时，至少会是1毫秒，而不会出现sleep(0毫秒)令cpu空转
+            long needSleepTime = (nextTickTime - System.nanoTime() + 999999) / 1000000;
+//            System.out.println("waitForNextTick needSleepTime=" + needSleepTime);
             try {
                 // 比起netty，忽略了一些处理特殊场景bug的逻辑
-                Thread.sleep(TimeUnit.NANOSECONDS.toMillis(needSleepTime));
+                Thread.sleep(needSleepTime);
             } catch (InterruptedException ignored) {
 
             }
