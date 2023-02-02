@@ -6,7 +6,6 @@ import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 /**
  * 层次时间轮，会存在空转问题

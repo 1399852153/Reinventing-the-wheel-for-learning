@@ -2,7 +2,11 @@ package timewheel.hierarchical.v1;
 
 import timewheel.MyTimeoutTaskNode;
 
+import java.sql.Timestamp;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public class MyHierarchicalHashedTimeWheelV1 {
@@ -79,7 +83,15 @@ public class MyHierarchicalHashedTimeWheelV1 {
             // 如果传入的deadline早于当前系统时间，则totalTickWhenTimeout可能会小于当前的totalTick
             // 这种情况下，让这个任务在当前tick下就立即超时而被调度是最合理的，而不能在求余后放到一个错误的位置而等一段时间才调度（所以必须取两者的最大值）
             final long ticks = Math.max(totalTickWhenTimeout, this.totalTick); // Ensure we don't schedule for past.
-            int stopIndex = (int) (ticks & mask);
+            // 如果能限制环形数组的长度为2的幂，则可以改为ticks & mask，位运算效率更高
+            int stopIndex = (int) (ticks % mask);
+
+            System.out.println("addTimeoutTask=" + new Timestamp(TimeUnit.NANOSECONDS.toMillis(deadline))
+                + " totalTickWhenTimeout=" + totalTickWhenTimeout
+                + " this.totalTick=" + this.totalTick
+                + " this.mask=" + this.mask
+                + " stopIndex=" + stopIndex);
+
             MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[stopIndex];
             // 计算并找到应该被放置的那个bucket后，将其插入当前bucket指向的链表中
             bucket.addTimeout(timeoutTaskNode);
@@ -100,12 +112,14 @@ public class MyHierarchicalHashedTimeWheelV1 {
 
     public void advanceClockByTick(Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         // 当前时间轮的总tick数满了一圈之后，推进上一层时间轮进行一次tick(如果上一层时间轮存在的话)
-        if(this.totalTick > 0 && this.totalTick % this.ringBucketArray.length == 0){
+        if(this.totalTick > 0 && this.totalTick % this.ringBucketArray.length == 0
+            && this.overFlowWheel != null){
             this.overFlowWheel.advanceClockByTick(flushInLowerWheelFn);
         }
 
         // 基于总tick数，对环形数组的长度取模，计算出当前tick下需要处理的bucket桶的下标
-        int idx = (int) (this.totalTick & mask);
+        int idx = (int) (this.totalTick % mask);
+
         MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[idx];
 
         if(this.isLowestWheel){
@@ -120,5 +134,12 @@ public class MyHierarchicalHashedTimeWheelV1 {
 
         // 当前时间轮的总tick自增1
         this.totalTick++;
+    }
+
+    @Override
+    public String toString() {
+        return "MyHierarchicalHashedTimeWheelV1{" +
+            "ringBucketArray=" + Arrays.toString(ringBucketArray) +
+            '}';
     }
 }

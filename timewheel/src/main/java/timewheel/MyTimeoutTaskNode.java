@@ -41,4 +41,9 @@ public class MyTimeoutTaskNode {
     public void setTargetTask(Runnable targetTask) {
         this.targetTask = targetTask;
     }
+
+    @Override
+    public String toString() {
+        return "node";
+    }
 }

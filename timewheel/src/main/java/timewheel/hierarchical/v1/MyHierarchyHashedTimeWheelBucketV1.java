@@ -55,4 +55,9 @@ public class MyHierarchyHashedTimeWheelBucketV1 {
             // 简单起见，不考虑任务被外部自己取消的case(netty里的timeout.isCancelled())
         }
     }
+
+    @Override
+    public String toString() {
+        return linkedList.size() + "";
+    }
 }

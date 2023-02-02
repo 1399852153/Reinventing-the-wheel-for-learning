@@ -101,7 +101,7 @@ public class MyHashedTimeWheel {
                 transferTaskToBuckets();
 
                 // 基于总tick数，对环形数组的长度取模，计算出当前tick下需要处理的bucket桶的下标
-                int idx = (int) (MyHashedTimeWheel.this.totalTick & mask);
+                int idx = (int) (MyHashedTimeWheel.this.totalTick % mask);
                 MyHashedTimeWheelBucket bucket = MyHashedTimeWheel.this.ringBucketArray[idx];
                 // 处理当前插槽内的任务(遍历链表中的所有任务，round全部减一，如果减为负数了则说明这个任务超时到期了，将其从链表中移除后并交给线程池执行指定的任务)
                 bucket.expireTimeoutTask(MyHashedTimeWheel.this.taskExecutor);
@@ -157,7 +157,8 @@ public class MyHashedTimeWheel {
                 // 如果传入的deadline早于当前系统时间，则totalTickWhenTimeout可能会小于当前的totalTick
                 // 这种情况下，让这个任务在当前tick下就立即超时而被调度是最合理的，而不能在求余后放到一个错误的位置而等一段时间才调度（所以必须取两者的最大值）
                 final long ticks = Math.max(totalTickWhenTimeout, MyHashedTimeWheel.this.totalTick); // Ensure we don't schedule for past.
-                int stopIndex = (int) (ticks & mask);
+                // 如果能限制环形数组的长度为2的幂，则可以改为ticks & mask，位运算效率更高
+                int stopIndex = (int) (ticks % mask);
                 MyHashedTimeWheelBucket bucket = MyHashedTimeWheel.this.ringBucketArray[stopIndex];
                 // 计算并找到应该被放置的那个bucket后，将其插入当前bucket指向的链表中
                 bucket.addTimeout(timeoutTaskNode);
