@@ -6,6 +6,7 @@ import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * 层次时间轮，会存在空转问题
@@ -42,7 +43,7 @@ public class MyHierarchicalHashedTimerV1 {
     /**
      * timer持有的最低层的时间轮
      * */
-    private final MyHierarchicalHashedTimeWheelV1 lowestTimeWheel;
+    final MyHierarchicalHashedTimeWheelV1 lowestTimeWheel;
 
     /**
      * 构造函数
@@ -52,7 +53,7 @@ public class MyHierarchicalHashedTimerV1 {
         this.taskExecutor = taskExecutor;
 
         // 初始化最底层的时间轮
-        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV1(ringArraySize,perTickTime,taskExecutor);
+        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV1(ringArraySize,perTickTime,taskExecutor,true);
     }
 
     /**
@@ -95,7 +96,12 @@ public class MyHierarchicalHashedTimerV1 {
                 transferTaskToTimeWheel();
 
                 // 推进时间轮(层级时间轮内部满了一圈就会进一步的推进更上一层的时间轮)
-                MyHierarchicalHashedTimerV1.this.lowestTimeWheel.advanceClockByTick();
+                MyHierarchicalHashedTimerV1.this.lowestTimeWheel.advanceClockByTick(
+                    (taskNode)->
+                        // 参考kafka的写法，避免Timer里的一些属性被传到各个bucket里面
+                        MyHierarchicalHashedTimerV1.this.lowestTimeWheel
+                            .addTimeoutTask(MyHierarchicalHashedTimerV1.this.startTime, taskNode)
+                );
 
                 // 循环tick一次，总tick数自增1
                 MyHierarchicalHashedTimerV1.this.totalTick++;
