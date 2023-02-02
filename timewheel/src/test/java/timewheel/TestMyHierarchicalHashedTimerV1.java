@@ -10,13 +10,13 @@ public class TestMyHierarchicalHashedTimerV1 {
 
     public static void main(String[] args) throws InterruptedException {
         MyHierarchicalHashedTimerV1 myHierarchicalHashedTimerV1 = new MyHierarchicalHashedTimerV1(
-            10, TimeUnit.MILLISECONDS.toNanos(1000),
+            3, TimeUnit.MILLISECONDS.toNanos(1000),
             Executors.newFixedThreadPool(10));
 
         myHierarchicalHashedTimerV1.startTimeWheel();
 
-        Thread.sleep(1000L);
-        for(int i=0; i<5; i++) {
+        Thread.sleep(1500L);
+        for(int i=0; i<50; i++) {
             int index = i;
             myHierarchicalHashedTimerV1.newTimeoutTask(
                 () -> System.out.println("task execute: i=" + index + " " + new Date()),
