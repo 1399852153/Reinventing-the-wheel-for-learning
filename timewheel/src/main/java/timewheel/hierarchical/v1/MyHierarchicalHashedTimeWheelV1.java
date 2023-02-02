@@ -24,11 +24,6 @@ public class MyHierarchicalHashedTimeWheelV1 {
     private final long interval;
 
     /**
-     * ringBuffer.length的值减1, 作为掩码计算
-     * */
-    private final int mask;
-
-    /**
      * 时间轮每次转动的时间(单位：纳秒nanos)
      * (perTickTime越短，调度会更精确，但cpu开销也会越大)
      * */
@@ -59,7 +54,6 @@ public class MyHierarchicalHashedTimeWheelV1 {
         this.perTickTime = perTickTime;
         this.taskExecutor = taskExecutor;
         this.interval = perTickTime * ringArraySize;
-        this.mask = ringArraySize-1;
         this.isLowestWheel = isLowestWheel;
     }
 
@@ -84,12 +78,11 @@ public class MyHierarchicalHashedTimeWheelV1 {
             // 这种情况下，让这个任务在当前tick下就立即超时而被调度是最合理的，而不能在求余后放到一个错误的位置而等一段时间才调度（所以必须取两者的最大值）
             final long ticks = Math.max(totalTickWhenTimeout, this.totalTick); // Ensure we don't schedule for past.
             // 如果能限制环形数组的长度为2的幂，则可以改为ticks & mask，位运算效率更高
-            int stopIndex = (int) (ticks % mask);
+            int stopIndex = (int) (ticks % this.ringBucketArray.length);
 
             System.out.println("addTimeoutTask=" + new Timestamp(TimeUnit.NANOSECONDS.toMillis(deadline))
                 + " totalTickWhenTimeout=" + totalTickWhenTimeout
                 + " this.totalTick=" + this.totalTick
-                + " this.mask=" + this.mask
                 + " stopIndex=" + stopIndex);
 
             MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[stopIndex];
@@ -118,7 +111,9 @@ public class MyHierarchicalHashedTimeWheelV1 {
         }
 
         // 基于总tick数，对环形数组的长度取模，计算出当前tick下需要处理的bucket桶的下标
-        int idx = (int) (this.totalTick % mask);
+        int idx = (int) (this.totalTick % this.ringBucketArray.length);
+
+        System.out.println("this.totalTick=" + this.totalTick + " " + new Date() + " " + this + " idx=" + idx);
 
         MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[idx];
 
