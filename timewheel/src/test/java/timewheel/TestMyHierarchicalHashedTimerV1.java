@@ -1,25 +1,25 @@
 package timewheel;
 
 import timewheel.hierarchical.v1.MyHierarchicalHashedTimerV1;
+import timewheel.model.ExecuteTimeValidTask;
 
-import java.util.Date;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class TestMyHierarchicalHashedTimerV1 {
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
+        long perTickTime = 100;
         MyHierarchicalHashedTimerV1 myHierarchicalHashedTimerV1 = new MyHierarchicalHashedTimerV1(
-            3, TimeUnit.MILLISECONDS.toNanos(1000),
+            32, TimeUnit.MILLISECONDS.toNanos(perTickTime),
             Executors.newFixedThreadPool(10));
 
         myHierarchicalHashedTimerV1.startTimeWheel();
 
-        Thread.sleep(1500L);
-        for(int i=0; i<50; i++) {
-            int index = i;
+        for(int i=0; i<100; i++) {
+            double allowableMistake = perTickTime * 2;
             myHierarchicalHashedTimerV1.newTimeoutTask(
-                () -> System.out.println("task execute: i=" + index + " " + new Date()),
+                new ExecuteTimeValidTask(i,TimeUnit.SECONDS,allowableMistake),
                 i, TimeUnit.SECONDS);
         }
     }
