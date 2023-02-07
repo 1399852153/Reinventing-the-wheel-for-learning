@@ -1,16 +1,18 @@
-package timewheel.hierarchical.v1;
+package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
 
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.concurrent.Delayed;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
  * 时间轮环形数组下标对应的桶(保存一个超时任务MyTimeoutTaskNode的链表)
  * */
-public class MyHierarchyHashedTimeWheelBucketV1 {
+public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
 
     private final LinkedList<MyTimeoutTaskNode> linkedList = new LinkedList<>();
 
@@ -54,5 +56,16 @@ public class MyHierarchyHashedTimeWheelBucketV1 {
 
             // 简单起见，不考虑任务被外部自己取消的case(netty里的timeout.isCancelled())
         }
+    }
+
+
+    @Override
+    public long getDelay(TimeUnit unit) {
+        return 0;
+    }
+
+    @Override
+    public int compareTo(Delayed o) {
+        return 0;
     }
 }

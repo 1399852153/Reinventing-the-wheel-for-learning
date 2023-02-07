@@ -70,7 +70,6 @@ public class MyHierarchicalHashedTimeWheelV1 {
         // 当前时间轮所能承载的最大绝对时间为：每个tick的间隔 * 插槽数 + (基于startTime的当前绝对时间)
         long currentWheelMaxRange = this.interval + (startTime + this.perTickTime * this.totalTick);
 
-//        System.out.println("addTimeoutTask deadline=" + deadline + " currentWheelMaxRange=" + currentWheelMaxRange);
         if(deadline < currentWheelMaxRange){
             // 当前时间轮能够承载这个任务，无需放到上一层时间轮中
 
@@ -85,18 +84,11 @@ public class MyHierarchicalHashedTimeWheelV1 {
             // 如果能限制环形数组的长度为2的幂，则可以改为ticks & mask，位运算效率更高
             int stopIndex = (int) (ticks % this.ringBucketArray.length);
 
-//            System.out.println("addTimeoutTask in wheel=" + new Timestamp(TimeUnit.NANOSECONDS.toMillis(deadline))
-//                + " totalTickWhenTimeout=" + totalTickWhenTimeout
-//                + " this.totalTick=" + this.totalTick
-//                + " stopIndex=" + stopIndex);
-
             MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[stopIndex];
             // 计算并找到应该被放置的那个bucket后，将其插入当前bucket指向的链表中
             bucket.addTimeout(timeoutTaskNode);
         }else{
             // 当前时间轮无法承载这个任务，需要放到上一层时间轮中
-//            System.out.println("addTimeoutTask in overflowWheel=" + new Timestamp(TimeUnit.NANOSECONDS.toMillis(deadline))
-//                + " this.totalTick=" + this.totalTick);
 
             // 上层时间轮不存在，创建之
             if(this.overFlowWheel == null){
@@ -113,8 +105,6 @@ public class MyHierarchicalHashedTimeWheelV1 {
     public void advanceClockByTick(Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         // 基于总tick数，对环形数组的长度取模，计算出当前tick下需要处理的bucket桶的下标
         int idx = (int) (this.totalTick % this.ringBucketArray.length);
-
-//        System.out.println("this.totalTick=" + this.totalTick + " " + new Date() + " " + this + " idx=" + idx);
 
         MyHierarchyHashedTimeWheelBucketV1 bucket = this.ringBucketArray[idx];
 
