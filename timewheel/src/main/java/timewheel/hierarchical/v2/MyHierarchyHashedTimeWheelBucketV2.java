@@ -7,12 +7,18 @@ import java.util.LinkedList;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
  * 时间轮环形数组下标对应的桶(保存一个超时任务MyTimeoutTaskNode的链表)
  * */
 public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
+
+    /**
+     * 过期时间的绝对值
+     */
+    private final AtomicLong expiration = new AtomicLong(-1L);
 
     private final LinkedList<MyTimeoutTaskNode> linkedList = new LinkedList<>();
 
@@ -58,14 +64,30 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
         }
     }
 
+    /**
+     * 设置过期时间
+     * @return true 之前的expiration和参数不一致，说明是新的一轮，需要将当前bucket放入timer的延迟队列中
+     *         false 之前的expiration和参数一致，说明是同一轮，无需任何操作
+     */
+    public boolean setExpiration(long expire) {
+        // 如果getAndSet返回的之前的expiration和参数不一致，则说明已经是新的一轮了
+        return expiration.getAndSet(expire) != expire;
+    }
 
     @Override
     public long getDelay(TimeUnit unit) {
-        return 0;
+        // expiration相当于绝对时间超时时间，是System.nanoTime() + 传入的delay参数计算出来的
+        // 所以获得getDelay时需要再减掉才能保证在正确的时间点出队
+        return Math.max(0,unit.convert(expiration.get() - System.nanoTime(), TimeUnit.NANOSECONDS));
     }
 
     @Override
     public int compareTo(Delayed o) {
+        if (o instanceof MyHierarchyHashedTimeWheelBucketV2) {
+            // 延迟时间越小的，排在越前面，越先被计时器获得
+            return Long.compare(expiration.get(), ((MyHierarchyHashedTimeWheelBucketV2) o).expiration.get());
+        }
+
         return 0;
     }
 }

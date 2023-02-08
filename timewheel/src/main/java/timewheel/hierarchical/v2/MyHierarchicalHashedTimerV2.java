@@ -66,7 +66,7 @@ public class MyHierarchicalHashedTimerV2 {
         this.currentTime = System.nanoTime();
 
         // 初始化最底层的时间轮
-        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,currentTime,perTickTime,taskExecutor,0);
+        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,currentTime,perTickTime,taskExecutor,0,this.delayQueue);
     }
 
     /**
