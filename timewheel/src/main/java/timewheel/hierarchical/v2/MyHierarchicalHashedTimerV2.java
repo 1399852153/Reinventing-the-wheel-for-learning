@@ -2,6 +2,8 @@ package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
 
+import java.sql.Time;
+import java.util.Date;
 import java.util.Queue;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Executor;
@@ -63,7 +65,7 @@ public class MyHierarchicalHashedTimerV2 {
         this.perTickTime = perTickTime;
         this.taskExecutor = taskExecutor;
 
-        this.currentTime = System.nanoTime();
+        this.currentTime = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis());
 
         // 初始化最底层的时间轮
         this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,currentTime,perTickTime,taskExecutor,0,this.delayQueue);
@@ -79,7 +81,7 @@ public class MyHierarchicalHashedTimerV2 {
     }
 
     public void newTimeoutTask(Runnable task, long delayTime, TimeUnit timeUnit){
-        long deadline = System.nanoTime() + timeUnit.toNanos(delayTime);
+        long deadline = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis()) + timeUnit.toNanos(delayTime);
 
         // Guard against overflow.
         if (delayTime > 0 && deadline < 0) {
@@ -101,10 +103,12 @@ public class MyHierarchicalHashedTimerV2 {
 
             // 简单起见，不考虑优雅启动和暂停的逻辑
             while (true){
+                MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
+
+                System.out.println("waitForNextTick " + new Date());
+
                 // 将加入到队列中的任务转移到时间轮中，层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
                 transferTaskToTimeWheel();
-
-                MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
 
                 // bucket可能为null，因为延迟队列设置了最大超时时间
                 if(bucketV2 != null){

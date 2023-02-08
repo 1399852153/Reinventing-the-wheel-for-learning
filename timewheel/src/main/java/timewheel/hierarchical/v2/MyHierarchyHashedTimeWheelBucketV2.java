@@ -80,9 +80,9 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
 
     @Override
     public long getDelay(TimeUnit unit) {
-        // expiration相当于绝对时间超时时间，是System.nanoTime() + 传入的delay参数计算出来的
+        // expiration相当于绝对时间超时时间，是System.currentTimeMillis() + 传入的delay参数计算出来的
         // 所以获得getDelay时需要再减掉才能保证在正确的时间点出队
-        return Math.max(0,unit.convert(expiration.get() - System.nanoTime(), TimeUnit.NANOSECONDS));
+        return Math.max(0,unit.convert(expiration.get() - TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis()), TimeUnit.NANOSECONDS));
     }
 
     @Override

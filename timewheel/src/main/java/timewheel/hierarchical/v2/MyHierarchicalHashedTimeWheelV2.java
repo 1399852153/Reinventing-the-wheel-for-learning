@@ -3,8 +3,10 @@ package timewheel.hierarchical.v2;
 import timewheel.MyTimeoutTaskNode;
 
 import java.util.Arrays;
+import java.util.Date;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public class MyHierarchicalHashedTimeWheelV2 {
@@ -67,10 +69,14 @@ public class MyHierarchicalHashedTimeWheelV2 {
         long deadline = timeoutTaskNode.getDeadline();
 
         if(deadline < this.currentTime + this.perTickTime){
+            System.out.println("deadline太小了,连1tick都不到就要被执行");
+
             // deadline太小了,连1tick都不到就要被执行
             // 直接去执行即可
             this.taskExecutor.execute(timeoutTaskNode.getTargetTask());
         }else if(deadline > currentTime + this.interval){
+            System.out.println("超过了当前时间轮的承载范围, 加入到上层时间轮");
+
             // 超过了当前时间轮的承载范围, 加入到上层时间轮
 
             // 上层时间轮不存在，创建之
@@ -89,6 +95,11 @@ public class MyHierarchicalHashedTimeWheelV2 {
             long totalTick = deadline / this.perTickTime;
             // 计算应该被放到当前时间轮的哪一个插槽中
             int targetBucketIndex = (int) (totalTick % this.ringBucketArray.length);
+
+            System.out.println("当前时间轮放得下，找到对应的位置 level=" + this.level
+                + " deadline=" + new Date(TimeUnit.NANOSECONDS.toMillis(deadline)) + " currentTime=" + new Date(TimeUnit.NANOSECONDS.toMillis(currentTime))
+                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms interval=" + this.interval + " targetBucketIndex=" + targetBucketIndex
+            );
 
             MyHierarchyHashedTimeWheelBucketV2 targetBucket = this.ringBucketArray[targetBucketIndex];
             // 将任务放到对应插槽中

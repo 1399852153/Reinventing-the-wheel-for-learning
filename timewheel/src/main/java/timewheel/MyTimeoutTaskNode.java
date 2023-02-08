@@ -1,5 +1,8 @@
 package timewheel;
 
+import java.sql.Timestamp;
+import java.util.concurrent.TimeUnit;
+
 public class MyTimeoutTaskNode {
 
     /**
@@ -44,6 +47,8 @@ public class MyTimeoutTaskNode {
 
     @Override
     public String toString() {
-        return "node";
+        return "MyTimeoutTaskNode{" +
+            "deadline=" + new Timestamp(TimeUnit.NANOSECONDS.toMillis(deadline)) +
+            '}';
     }
 }
