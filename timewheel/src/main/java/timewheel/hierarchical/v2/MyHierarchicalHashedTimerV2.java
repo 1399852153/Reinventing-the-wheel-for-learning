@@ -1,14 +1,17 @@
 package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
+import timewheel.util.PrintDateUtil;
 
 import java.sql.Time;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Queue;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * 层次时间轮，会存在空转问题
@@ -54,7 +57,8 @@ public class MyHierarchicalHashedTimerV2 {
         this.perTickTime = perTickTime;
         this.taskExecutor = taskExecutor;
 
-        long startTime = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis());
+        long startTime = System.nanoTime();
+        System.out.println(PrintDateUtil.parseDate(startTime));
 
         // 初始化最底层的时间轮
         this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,startTime,perTickTime,taskExecutor,0,this.delayQueue);
@@ -70,7 +74,7 @@ public class MyHierarchicalHashedTimerV2 {
     }
 
     public void newTimeoutTask(Runnable task, long delayTime, TimeUnit timeUnit){
-        long deadline = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis()) + timeUnit.toNanos(delayTime);
+        long deadline = System.nanoTime() + timeUnit.toNanos(delayTime);
 
         // Guard against overflow.
         if (delayTime > 0 && deadline < 0) {
@@ -95,14 +99,19 @@ public class MyHierarchicalHashedTimerV2 {
             while (true){
                 MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
 
-                System.out.println("waitForNextTick " + new Date());
+                System.out.println("waitForNextTick " + new Date() + " bucketV2=" + bucketV2);
 
                 // bucket可能为null，因为延迟队列设置了最大超时时间
                 if(bucketV2 != null){
                     // 推进时间轮(层级时间轮内部满了一圈就会进一步的推进更上一层的时间轮)
                     // 参考kafka的写法，避免Timer里的一些属性被传到各个bucket里面
                     MyHierarchicalHashedTimerV2.this.lowestTimeWheel.advanceClockByTick(
-                        bucketV2, MyHierarchicalHashedTimerV2.this.lowestTimeWheel::addTimeoutTask);
+                        bucketV2, new Consumer<MyTimeoutTaskNode>() {
+                            @Override
+                            public void accept(MyTimeoutTaskNode myTimeoutTaskNode) {
+                                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(myTimeoutTaskNode);
+                            }
+                        });
                 }
             }
         }

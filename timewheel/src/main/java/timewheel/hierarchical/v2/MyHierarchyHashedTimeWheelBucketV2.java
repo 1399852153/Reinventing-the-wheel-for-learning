@@ -1,6 +1,7 @@
 package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
+import timewheel.util.PrintDateUtil;
 
 import java.util.Date;
 import java.util.Iterator;
@@ -21,29 +22,39 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
      */
     private final AtomicLong expiration = new AtomicLong(-1L);
 
+    private final int level;
+
+    private final int index;
+
     private final LinkedList<MyTimeoutTaskNode> linkedList = new LinkedList<>();
 
-    public void addTimeout(MyTimeoutTaskNode timeout) {
+    public MyHierarchyHashedTimeWheelBucketV2(int level, int index) {
+        this.level = level;
+        this.index = index;
+    }
+
+    public synchronized void addTimeout(MyTimeoutTaskNode timeout) {
         linkedList.add(timeout);
+
+//        System.out.println("addTimeout!!! linkedList.size=" + linkedList.size() + " level=" + level + " index=" + index);
+    }
+
+    public int getLevel() {
+        return level;
     }
 
     /**
-     * 遍历链表中的所有任务，round全部减一，如果减为负数了则说明这个任务超时到期了，将其从链表中移除后并交给线程池执行指定的任务
+     * 遍历链表中的所有任务，将其从链表中移除后并交给线程池执行指定的任务
      * */
-    public void expireTimeoutTask(Executor executor){
+    public synchronized void expireTimeoutTask(Executor executor){
         Iterator<MyTimeoutTaskNode> iterator = linkedList.iterator();
         while(iterator.hasNext()){
             MyTimeoutTaskNode currentNode = iterator.next();
-            long currentNodeRound = currentNode.getRounds();
-            if(currentNodeRound <= 0){
-                // 将其从链表中移除
-                iterator.remove();
-                // count小于等于0，说明超时了，交给线程池去异步执行
-                executor.execute(currentNode.getTargetTask());
-            }else{
-                // 当前节点还未超时，round自减1
-                currentNode.setRounds(currentNodeRound-1);
-            }
+
+            // 将其从链表中移除
+            iterator.remove();
+            // count小于等于0，说明超时了，交给线程池去异步执行
+            executor.execute(currentNode.getTargetTask());
 
             // 简单起见，不考虑任务被外部自己取消的case(netty里的timeout.isCancelled())
         }
@@ -52,9 +63,9 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
     /**
      * 将当前bucket中的数据，通过flushInLowerWheelFn，全部转移到更底层的时间轮中
      * */
-    public void flush(Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
+    public synchronized void flush(Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         Iterator<MyTimeoutTaskNode> iterator = linkedList.iterator();
-        while(iterator.hasNext()){
+        while (iterator.hasNext()) {
             MyTimeoutTaskNode currentNode = iterator.next();
             // 先从链表中移除
             iterator.remove();
@@ -81,9 +92,9 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
 
     @Override
     public long getDelay(TimeUnit unit) {
-        // expiration相当于绝对时间超时时间，是System.currentTimeMillis() + 传入的delay参数计算出来的
+        // expiration相当于绝对时间超时时间，是System.nanoTime() + 传入的delay参数计算出来的
         // 所以获得getDelay时需要再减掉才能保证在正确的时间点出队
-        return Math.max(0,unit.convert(expiration.get() - TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis()), TimeUnit.NANOSECONDS));
+        return Math.max(0,unit.convert(expiration.get() - System.nanoTime(), TimeUnit.NANOSECONDS));
     }
 
     @Override
@@ -94,5 +105,15 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
         }
 
         return 0;
+    }
+
+    @Override
+    public String toString() {
+        return "MyHierarchyHashedTimeWheelBucketV2{" +
+            ", level=" + level +
+            ", index=" + index +
+            ", expiration=" + PrintDateUtil.parseDate(this.expiration.get()) +
+            ", size=" + linkedList.size() +
+            '}';
     }
 }
