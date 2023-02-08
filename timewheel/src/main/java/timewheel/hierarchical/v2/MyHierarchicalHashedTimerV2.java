@@ -101,19 +101,18 @@ public class MyHierarchicalHashedTimerV2 {
 
             // 简单起见，不考虑优雅启动和暂停的逻辑
             while (true){
-                MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
-
-                // 在捞取当前tick下需要处理的bucket前，先将加入到队列中的任务转移到时间轮中(可能包含在当前tick下就要处理的任务)
-                // 层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
+                // 将加入到队列中的任务转移到时间轮中，层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
                 transferTaskToTimeWheel();
 
-                // 推进时间轮(层级时间轮内部满了一圈就会进一步的推进更上一层的时间轮)
-                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.advanceClockByTick(bucketV2,
-                    (taskNode)->
-                        // 参考kafka的写法，避免Timer里的一些属性被传到各个bucket里面
-                        MyHierarchicalHashedTimerV2.this.lowestTimeWheel
-                            .addTimeoutTask(MyHierarchicalHashedTimerV2.this.startTime, taskNode)
-                );
+                MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
+
+                // bucket可能为null，因为延迟队列设置了最大超时时间
+                if(bucketV2 != null){
+                    // 推进时间轮(层级时间轮内部满了一圈就会进一步的推进更上一层的时间轮)
+                    // 参考kafka的写法，避免Timer里的一些属性被传到各个bucket里面
+                    MyHierarchicalHashedTimerV2.this.lowestTimeWheel.advanceClockByTick(
+                        bucketV2, MyHierarchicalHashedTimerV2.this.lowestTimeWheel::addTimeoutTask);
+                }
             }
         }
 
@@ -146,8 +145,7 @@ public class MyHierarchicalHashedTimerV2 {
                 }
 
                 // 层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
-                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(
-                    MyHierarchicalHashedTimerV2.this.startTime, timeoutTaskNode);
+                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(timeoutTaskNode);
             }
         }
     }

@@ -37,7 +37,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
     /**
      * 保存bucket的延迟队列，用于解决时间轮空转的问题
      */
-    private DelayQueue<MyHierarchyHashedTimeWheelBucketV2> delayQueue;
+    private final DelayQueue<MyHierarchyHashedTimeWheelBucketV2> delayQueue;
 
     /**
      * 当前时间轮的绝对时间
@@ -63,11 +63,11 @@ public class MyHierarchicalHashedTimeWheelV2 {
     /**
      * 当前时间轮加入任务(溢出的话，则需要放到上一层的时间轮中)
      * */
-    public void addTimeoutTask(long currentTime, MyTimeoutTaskNode timeoutTaskNode){
+    public void addTimeoutTask(MyTimeoutTaskNode timeoutTaskNode){
         long deadline = timeoutTaskNode.getDeadline();
 
-        if(deadline < currentTime){
-            // deadline太小了，已经超时了
+        if(deadline < this.currentTime + this.perTickTime){
+            // deadline太小了,连1tick都不到就要被执行
             // 直接去执行即可
             this.taskExecutor.execute(timeoutTaskNode.getTargetTask());
         }else if(deadline > currentTime + this.interval){
@@ -81,7 +81,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
             }
 
             // 加入到上一层的时间轮中(对于较大的deadline，addTimeoutTask操作可能会递归数次，放到第N层的时间轮中)
-            this.overFlowWheel.addTimeoutTask(this.currentTime,timeoutTaskNode);
+            this.overFlowWheel.addTimeoutTask(timeoutTaskNode);
         }else{
             // 当前时间轮放得下，找到对应的位置
 
@@ -105,6 +105,10 @@ public class MyHierarchicalHashedTimeWheelV2 {
         }
     }
 
+    /**
+     * 和v1版本不同，是在最近的bucket被拉取时才执行的
+     * 所以要基于bucket中设置的超时时间expiration来更新当前时间
+     * */
     public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket,Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         if(this.level == 0){
             // 如果是最底层的时间轮，将当前tick下命中的bucket中的任务丢到taskExecutor中执行
@@ -116,8 +120,17 @@ public class MyHierarchicalHashedTimeWheelV2 {
             bucket.flush(flushInLowerWheelFn);
         }
 
-        // 计算当前是否需要推进上一层的时间轮
-        this.overFlowWheel.advanceClockByTick(bucket,flushInLowerWheelFn);
+        long expiration = bucket.getExpiration();
+
+        // bucket的expiration可以理解为当前时间，如果当前时间比当前时间轮的原有时间 + 1tick大，说明需要推进当前时间轮的刻度了
+        if(expiration > this.currentTime + this.perTickTime){
+            // 更新当前时间轮的刻度
+            this.currentTime = expiration - (expiration % this.perTickTime);
+            if (this.overFlowWheel != null) {
+                // 计算当前是否需要推进上一层的时间轮
+                this.overFlowWheel.advanceClockByTick(bucket,flushInLowerWheelFn);
+            }
+        }
     }
 
     @Override

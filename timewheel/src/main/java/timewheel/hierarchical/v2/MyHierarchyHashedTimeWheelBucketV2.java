@@ -74,6 +74,10 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
         return expiration.getAndSet(expire) != expire;
     }
 
+    public long getExpiration(){
+        return expiration.get();
+    }
+
     @Override
     public long getDelay(TimeUnit unit) {
         // expiration相当于绝对时间超时时间，是System.nanoTime() + 传入的delay参数计算出来的
