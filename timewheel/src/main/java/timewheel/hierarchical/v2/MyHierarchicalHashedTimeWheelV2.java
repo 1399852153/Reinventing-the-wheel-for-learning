@@ -2,6 +2,7 @@ package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
 
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.concurrent.DelayQueue;
@@ -51,7 +52,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
         this.ringBucketArray = new MyHierarchyHashedTimeWheelBucketV2[ringArraySize];
         for(int i=0; i<ringArraySize; i++){
             // 初始化，填充满时间轮唤醒数组
-            this.ringBucketArray[i] = new MyHierarchyHashedTimeWheelBucketV2();
+            this.ringBucketArray[i] = new MyHierarchyHashedTimeWheelBucketV2(level,i);
         }
 
         this.currentTime = currentTime;
@@ -96,11 +97,6 @@ public class MyHierarchicalHashedTimeWheelV2 {
             // 计算应该被放到当前时间轮的哪一个插槽中
             int targetBucketIndex = (int) (totalTick % this.ringBucketArray.length);
 
-            System.out.println("当前时间轮放得下，找到对应的位置 level=" + this.level
-                + " deadline=" + new Date(TimeUnit.NANOSECONDS.toMillis(deadline)) + " currentTime=" + new Date(TimeUnit.NANOSECONDS.toMillis(currentTime))
-                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms interval=" + this.interval + " targetBucketIndex=" + targetBucketIndex
-            );
-
             MyHierarchyHashedTimeWheelBucketV2 targetBucket = this.ringBucketArray[targetBucketIndex];
             // 将任务放到对应插槽中
             targetBucket.addTimeout(timeoutTaskNode);
@@ -108,6 +104,18 @@ public class MyHierarchicalHashedTimeWheelV2 {
             // 设置当前插槽的过期时间
             // 由于对perTickTime做了除法，能保证只要放在同一个桶内的所有任务节点，即使deadline不同，最后算出来的expiration是一样的
             long expiration = totalTick * this.perTickTime;
+
+            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
+            System.out.println("当前时间轮放得下，找到对应的位置 level=" + this.level
+                + " deadline=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(deadline)))
+                + " currentTime=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(currentTime)))
+                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
+                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
+                + " totalTick=" + totalTick
+                + " targetBucketIndex=" + targetBucketIndex
+                + " expiration=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(expiration)))
+            );
+
             boolean isNewRound = targetBucket.setExpiration(expiration);
             if(isNewRound){
                 // 之前的expiration和参数不一致，说明是新的一轮（之前bucket里的数据已经被取出来处理掉了），需要将当前bucket放入timer的延迟队列中
@@ -122,12 +130,9 @@ public class MyHierarchicalHashedTimeWheelV2 {
      * */
     public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket,Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         if(this.level == 0){
-            System.out.println("bucket.expireTimeoutTask");
             // 如果是最底层的时间轮，将当前tick下命中的bucket中的任务丢到taskExecutor中执行
             bucket.expireTimeoutTask(this.taskExecutor);
         }else{
-            System.out.println("bucket.flush");
-
             // 如果不是最底层的时间轮，将当前tick下命中的bucket中的任务交给下一层的时间轮
             // 这里转交到下一层有两种方式：第一种是从上到下的转交，另一种是当做新任务一样还是从最下层的时间轮开始放，放不下再往上溢出
             // 选用后一种逻辑，最大的复用已有的创建新任务的逻辑，会好理解一点
@@ -138,6 +143,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
 
         // bucket的expiration可以理解为当前时间，如果当前时间比当前时间轮的原有时间 + 1tick大，说明需要推进当前时间轮的刻度了
         if(expiration > this.currentTime + this.perTickTime){
+            System.out.println("更新当前时间轮的刻度 level=" + level);
             // 更新当前时间轮的刻度
             this.currentTime = expiration - (expiration % this.perTickTime);
             if (this.overFlowWheel != null) {
