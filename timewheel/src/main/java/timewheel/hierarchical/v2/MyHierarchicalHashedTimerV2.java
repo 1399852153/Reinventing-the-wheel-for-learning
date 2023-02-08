@@ -32,12 +32,6 @@ public class MyHierarchicalHashedTimerV2 {
     private final long perTickTime;
 
     /**
-     * 待处理任务的队列
-     * (多外部生产者写入，时间轮内的单worker消费者读取，所以netty的实现里使用了效率更高的MpscQueue，Mpsc即MultiProducerSingleConsumer)
-     * */
-    private final Queue<MyTimeoutTaskNode> unProcessTaskQueue = new LinkedBlockingDeque<>();
-
-    /**
      * timer持有的最低层的时间轮
      * */
     final MyHierarchicalHashedTimeWheelV2 lowestTimeWheel;
@@ -53,11 +47,6 @@ public class MyHierarchicalHashedTimerV2 {
     private final int ringArraySize;
 
     /**
-     * 当前时间轮绝对时间
-     * */
-    private long currentTime;
-
-    /**
      * 构造函数
      * */
     public MyHierarchicalHashedTimerV2(int ringArraySize, long perTickTime, Executor taskExecutor) {
@@ -65,10 +54,10 @@ public class MyHierarchicalHashedTimerV2 {
         this.perTickTime = perTickTime;
         this.taskExecutor = taskExecutor;
 
-        this.currentTime = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis());
+        long startTime = TimeUnit.MILLISECONDS.toNanos(System.currentTimeMillis());
 
         // 初始化最底层的时间轮
-        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,currentTime,perTickTime,taskExecutor,0,this.delayQueue);
+        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,startTime,perTickTime,taskExecutor,0,this.delayQueue);
     }
 
     /**
@@ -92,7 +81,8 @@ public class MyHierarchicalHashedTimerV2 {
         newTimeoutTaskNode.setTargetTask(task);
         newTimeoutTaskNode.setDeadline(deadline);
 
-        this.unProcessTaskQueue.add(newTimeoutTaskNode);
+        // 层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
+        MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(newTimeoutTaskNode);
     }
 
     private final class Worker implements Runnable{
@@ -106,9 +96,6 @@ public class MyHierarchicalHashedTimerV2 {
                 MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
 
                 System.out.println("waitForNextTick " + new Date());
-
-                // 将加入到队列中的任务转移到时间轮中，层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
-                transferTaskToTimeWheel();
 
                 // bucket可能为null，因为延迟队列设置了最大超时时间
                 if(bucketV2 != null){
@@ -131,25 +118,6 @@ public class MyHierarchicalHashedTimerV2 {
             }catch (InterruptedException e){
                 // 简单起见，不解决中断异常
                 throw new RuntimeException(e);
-            }
-        }
-
-        /**
-         * 加入到队列中的任务转移到时间轮中
-         * */
-        private void transferTaskToTimeWheel() {
-            // 为了避免worker线程在一次循环中处理太多的任务，所以直接限制了一个最大值100000
-            // 如果真的有这么多，就等到下次tick循环的时候再去做。
-            // 因为这个操作是cpu密集型的，处理太多的话，可能导致无法在一个短的tick周期内完成一次循环
-            for (int i = 0; i < 100000; i++) {
-                MyTimeoutTaskNode timeoutTaskNode = MyHierarchicalHashedTimerV2.this.unProcessTaskQueue.poll();
-                if (timeoutTaskNode == null) {
-                    // 队列为空了，直接结束
-                    return;
-                }
-
-                // 层级时间轮内部会做进一步的分配(放不下的话就溢出到更上一层的时间轮)
-                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(timeoutTaskNode);
             }
         }
     }

@@ -122,9 +122,12 @@ public class MyHierarchicalHashedTimeWheelV2 {
      * */
     public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket,Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
         if(this.level == 0){
+            System.out.println("bucket.expireTimeoutTask");
             // 如果是最底层的时间轮，将当前tick下命中的bucket中的任务丢到taskExecutor中执行
             bucket.expireTimeoutTask(this.taskExecutor);
         }else{
+            System.out.println("bucket.flush");
+
             // 如果不是最底层的时间轮，将当前tick下命中的bucket中的任务交给下一层的时间轮
             // 这里转交到下一层有两种方式：第一种是从上到下的转交，另一种是当做新任务一样还是从最下层的时间轮开始放，放不下再往上溢出
             // 选用后一种逻辑，最大的复用已有的创建新任务的逻辑，会好理解一点

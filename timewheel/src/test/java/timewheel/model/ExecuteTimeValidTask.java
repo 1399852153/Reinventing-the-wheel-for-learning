@@ -38,7 +38,7 @@ public class ExecuteTimeValidTask implements Runnable, TimerTask {
     private void runTask(){
         SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
         System.out.println("ExecuteTimeValidTask execute!" + simpleDateFormat.format(new Date()));
-//        executeTimeValid();
+        executeTimeValid();
     }
 
     private void executeTimeValid(){
