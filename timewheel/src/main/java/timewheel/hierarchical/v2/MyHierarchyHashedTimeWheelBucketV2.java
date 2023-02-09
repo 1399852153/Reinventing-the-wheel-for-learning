@@ -64,10 +64,11 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
      * 将当前bucket中的数据，通过flushInLowerWheelFn，全部转移到更底层的时间轮中
      * */
     public synchronized void flush(Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
+//        System.out.println("flush bucket=" + this);
+
         Iterator<MyTimeoutTaskNode> iterator = linkedList.iterator();
         while (iterator.hasNext()) {
             MyTimeoutTaskNode currentNode = iterator.next();
-            System.out.println("flush bucket=" + this);
             // 先从链表中移除
             iterator.remove();
             // 通过flushInLowerWheelFn，转移到更底层的时间轮中

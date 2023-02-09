@@ -63,7 +63,7 @@ public class MyHierarchicalHashedTimerV2 {
         System.out.println(PrintDateUtil.parseDate(startTime));
 
         // 初始化最底层的时间轮
-        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,startTime,perTickTime,taskExecutor,0,this.delayQueue);
+        this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(ringArraySize,startTime,startTime,perTickTime,taskExecutor,0,this.delayQueue);
     }
 
     /**

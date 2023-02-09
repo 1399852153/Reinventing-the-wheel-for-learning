@@ -47,7 +47,9 @@ public class MyHierarchicalHashedTimeWheelV2 {
      * */
     private long currentTime;
 
-    public MyHierarchicalHashedTimeWheelV2(int ringArraySize, long currentTime, long perTickTime,
+    private final long startTime;
+
+    public MyHierarchicalHashedTimeWheelV2(int ringArraySize,long startTime, long currentTime, long perTickTime,
                                            Executor taskExecutor, int level, DelayQueue<MyHierarchyHashedTimeWheelBucketV2> delayQueue) {
         this.ringBucketArray = new MyHierarchyHashedTimeWheelBucketV2[ringArraySize];
         for(int i=0; i<ringArraySize; i++){
@@ -55,6 +57,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
             this.ringBucketArray[i] = new MyHierarchyHashedTimeWheelBucketV2(level,i);
         }
 
+        this.startTime = startTime;
         this.currentTime = currentTime;
         this.taskExecutor = taskExecutor;
         this.perTickTime = perTickTime;
@@ -70,18 +73,54 @@ public class MyHierarchicalHashedTimeWheelV2 {
         long deadline = timeoutTaskNode.getDeadline();
 
         if(deadline < this.currentTime + this.perTickTime){
-            System.out.println("deadline太小了,连1tick都不到就要被执行");
+//            System.out.println("deadline太小了,连1tick都不到就要被执行"
+//                + " deadline=" + PrintDateUtil.parseDate(deadline)
+//                + " currentTime=" + PrintDateUtil.parseDate(currentTime)
+//                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
+//                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
+//            );
 
             // deadline太小了,连1tick都不到就要被执行
             // 直接去执行即可
             this.taskExecutor.execute(timeoutTaskNode.getTargetTask());
-        }else if(deadline >= currentTime + this.interval){
-            System.out.println("超过了当前时间轮的承载范围, 加入到上层时间轮"
-                + " deadline=" + PrintDateUtil.parseDate(deadline)
-                + " currentTime=" + PrintDateUtil.parseDate(currentTime)
-                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
-                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
-            );
+        }else if(deadline < currentTime + this.interval){
+            // 当前时间轮放得下，找到对应的位置
+
+            long remainTick = (deadline - startTime) / this.perTickTime;
+            // 计算应该被放到当前时间轮的哪一个插槽中
+            int targetBucketIndex = (int) (remainTick % this.ringBucketArray.length);
+
+            MyHierarchyHashedTimeWheelBucketV2 targetBucket = this.ringBucketArray[targetBucketIndex];
+            // 将任务放到对应插槽中
+            targetBucket.addTimeout(timeoutTaskNode);
+
+            // 设置当前插槽的过期时间
+            // 由于对perTickTime做了除法，能保证只要放在同一个桶内的所有任务节点，即使deadline不同，最后算出来的expiration是一样的
+            long expiration = deadline / this.perTickTime * this.perTickTime;
+
+//            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
+//            System.out.println("当前时间轮放得下，找到对应的位置 level=" + this.level
+//                + " deadline=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(deadline)))
+//                + " currentTime=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(currentTime)))
+//                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
+//                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
+//                + " remainTick=" + remainTick
+//                + " targetBucketIndex=" + targetBucketIndex
+//                + " expiration=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(expiration)))
+//            );
+
+            boolean isNewRound = targetBucket.setExpiration(expiration);
+            if(isNewRound){
+                // 之前的expiration和参数不一致，说明是新的一轮（之前bucket里的数据已经被取出来处理掉了），需要将当前bucket放入timer的延迟队列中
+                this.delayQueue.offer(targetBucket);
+            }
+        }else{
+//            System.out.println("超过了当前时间轮的承载范围, 加入到上层时间轮"
+//                + " deadline=" + PrintDateUtil.parseDate(deadline)
+//                + " currentTime=" + PrintDateUtil.parseDate(currentTime)
+//                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
+//                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
+//            );
 
             // 超过了当前时间轮的承载范围, 加入到上层时间轮
 
@@ -90,38 +129,6 @@ public class MyHierarchicalHashedTimeWheelV2 {
 
             // 加入到上一层的时间轮中(对于较大的deadline，addTimeoutTask操作可能会递归数次，放到第N层的时间轮中)
             overflowWheel.addTimeoutTask(timeoutTaskNode);
-        }else{
-            // 当前时间轮放得下，找到对应的位置
-
-            // 计算逻辑上的总tick值
-            long totalTick = deadline / this.perTickTime;
-            // 计算应该被放到当前时间轮的哪一个插槽中
-            int targetBucketIndex = (int) (totalTick % this.ringBucketArray.length);
-
-            MyHierarchyHashedTimeWheelBucketV2 targetBucket = this.ringBucketArray[targetBucketIndex];
-            // 将任务放到对应插槽中
-            targetBucket.addTimeout(timeoutTaskNode);
-
-            // 设置当前插槽的过期时间
-            // 由于对perTickTime做了除法，能保证只要放在同一个桶内的所有任务节点，即使deadline不同，最后算出来的expiration是一样的
-            long expiration = totalTick * this.perTickTime;
-
-            SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
-            System.out.println("当前时间轮放得下，找到对应的位置 level=" + this.level
-                + " deadline=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(deadline)))
-                + " currentTime=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(currentTime)))
-                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
-                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
-                + " totalTick=" + totalTick
-                + " targetBucketIndex=" + targetBucketIndex
-                + " expiration=" + simpleDateFormat.format(new Date(TimeUnit.NANOSECONDS.toMillis(expiration)))
-            );
-
-            boolean isNewRound = targetBucket.setExpiration(expiration);
-            if(isNewRound){
-                // 之前的expiration和参数不一致，说明是新的一轮（之前bucket里的数据已经被取出来处理掉了），需要将当前bucket放入timer的延迟队列中
-                this.delayQueue.offer(targetBucket);
-            }
         }
     }
 
@@ -132,14 +139,14 @@ public class MyHierarchicalHashedTimeWheelV2 {
     public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket){
         long expiration = bucket.getExpiration();
 
-        System.out.println("===============================");
-        System.out.println("advanceClockByTick" +
-            " expiration=" + PrintDateUtil.parseDate(expiration) +
-            " currentTime=" + PrintDateUtil.parseDate(currentTime) +
-            " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(this.perTickTime) +
-            " level=" + level
-        );
-        System.out.println("===============================");
+//        System.out.println("===============================");
+//        System.out.println("advanceClockByTick" +
+//            " expiration=" + PrintDateUtil.parseDate(expiration) +
+//            " currentTime=" + PrintDateUtil.parseDate(currentTime) +
+//            " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(this.perTickTime) +
+//            " level=" + level
+//        );
+//        System.out.println("===============================");
 
         // bucket的expiration可以理解为当前时间，如果当前时间比当前时间轮的原有时间 + 1tick大，说明需要推进当前时间轮的刻度了
         if(expiration >= this.currentTime + this.perTickTime){
@@ -151,6 +158,8 @@ public class MyHierarchicalHashedTimeWheelV2 {
                 // 计算当前是否需要推进上一层的时间轮
                 this.overFlowWheel.advanceClockByTick(bucket);
             }
+        }else{
+//            System.out.println("不更新当前时间轮的刻度 level=" + level);
         }
     }
 
@@ -160,7 +169,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
                 if(this.overFlowWheel == null){
                     // 上层时间轮的环形数组大小保持不变，perTick是当前时间轮的整个间隔(类似低层的60秒等于上一层的1分钟)
                     this.overFlowWheel = new MyHierarchicalHashedTimeWheelV2(
-                        this.ringBucketArray.length, this.currentTime, this.interval, this.taskExecutor,this.level+1,this.delayQueue);
+                        this.ringBucketArray.length,this.startTime, this.currentTime, this.interval, this.taskExecutor,this.level+1,this.delayQueue);
                 }
             }
         }

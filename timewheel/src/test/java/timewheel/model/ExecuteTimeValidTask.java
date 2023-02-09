@@ -19,11 +19,11 @@ public class ExecuteTimeValidTask implements Runnable, TimerTask {
     /**
      * 能容忍的误差（毫秒）
      * */
-    private final double allowableMistake;
+    private final double allowableMistakeMs;
 
-    public ExecuteTimeValidTask(long delayTime, TimeUnit timeUnit, double allowableMistake) {
+    public ExecuteTimeValidTask(long delayTime, TimeUnit timeUnit, double allowableMistakeMs) {
         this.needExecuteTime = System.currentTimeMillis() + timeUnit.toMillis(delayTime);
-        this.allowableMistake = allowableMistake;
+        this.allowableMistakeMs = allowableMistakeMs;
     }
 
     @Override
@@ -39,7 +39,7 @@ public class ExecuteTimeValidTask implements Runnable, TimerTask {
     private void runTask(){
         SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
         System.out.println("ExecuteTimeValidTask execute!" + simpleDateFormat.format(new Date())
-            + " needExecuteTime=" + PrintDateUtil.parseDate(needExecuteTime)
+            + " needExecuteTime=" + PrintDateUtil.parseDate(TimeUnit.MILLISECONDS.toNanos(needExecuteTime))
         );
         executeTimeValid();
     }
@@ -47,7 +47,7 @@ public class ExecuteTimeValidTask implements Runnable, TimerTask {
     private void executeTimeValid(){
         long actualExecuteTime = System.currentTimeMillis();
         long diff = Math.abs(actualExecuteTime - needExecuteTime);
-        if(diff > this.allowableMistake){
+        if(diff > this.allowableMistakeMs){
             System.out.println("executeTimeValid 校验失败 " +
                 "actualExecuteTime=" + new Timestamp(actualExecuteTime) + " needExecuteTime=" + new Timestamp(needExecuteTime));
         }
