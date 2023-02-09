@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit;
 public class TestMyHierarchicalHashedTimerV2 {
 
     public static void main(String[] args) {
-        long perTickTime = 100;
+        long perTickTime = 1000;
         MyHierarchicalHashedTimerV2 myHierarchicalHashedTimerV2 = new MyHierarchicalHashedTimerV2(
             10, TimeUnit.MILLISECONDS.toNanos(perTickTime),
             Executors.newFixedThreadPool(10));
