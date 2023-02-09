@@ -58,6 +58,8 @@ public class MyHierarchicalHashedTimerV2 {
         this.taskExecutor = taskExecutor;
 
         long startTime = System.nanoTime();
+        // 起始时间必须是tick的整数倍
+        startTime = startTime - (startTime % perTickTime);
         System.out.println(PrintDateUtil.parseDate(startTime));
 
         // 初始化最底层的时间轮
@@ -99,19 +101,20 @@ public class MyHierarchicalHashedTimerV2 {
             while (true){
                 MyHierarchyHashedTimeWheelBucketV2 bucketV2 = waitForNextTick();
 
-                System.out.println("waitForNextTick " + new Date() + " bucketV2=" + bucketV2);
+//                System.out.println("waitForNextTick " + new Date() + " bucketV2=" + bucketV2);
 
                 // bucket可能为null，因为延迟队列设置了最大超时时间
                 if(bucketV2 != null){
                     // 推进时间轮(层级时间轮内部满了一圈就会进一步的推进更上一层的时间轮)
-                    // 参考kafka的写法，避免Timer里的一些属性被传到各个bucket里面
-                    MyHierarchicalHashedTimerV2.this.lowestTimeWheel.advanceClockByTick(
-                        bucketV2, new Consumer<MyTimeoutTaskNode>() {
-                            @Override
-                            public void accept(MyTimeoutTaskNode myTimeoutTaskNode) {
-                                MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(myTimeoutTaskNode);
-                            }
-                        });
+                    MyHierarchicalHashedTimerV2.this.lowestTimeWheel.advanceClockByTick(bucketV2);
+
+                    // 先推进所有时间轮的时间，然后再尝试重置当前bucket上所有的任务
+                    bucketV2.flush(new Consumer<MyTimeoutTaskNode>() {
+                        @Override
+                        public void accept(MyTimeoutTaskNode myTimeoutTaskNode) {
+                            MyHierarchicalHashedTimerV2.this.lowestTimeWheel.addTimeoutTask(myTimeoutTaskNode);
+                        }
+                    });
                 }
             }
         }

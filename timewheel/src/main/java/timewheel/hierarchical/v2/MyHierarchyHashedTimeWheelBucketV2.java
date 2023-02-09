@@ -67,6 +67,7 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
         Iterator<MyTimeoutTaskNode> iterator = linkedList.iterator();
         while (iterator.hasNext()) {
             MyTimeoutTaskNode currentNode = iterator.next();
+            System.out.println("flush bucket=" + this);
             // 先从链表中移除
             iterator.remove();
             // 通过flushInLowerWheelFn，转移到更底层的时间轮中
@@ -110,7 +111,7 @@ public class MyHierarchyHashedTimeWheelBucketV2 implements Delayed {
     @Override
     public String toString() {
         return "MyHierarchyHashedTimeWheelBucketV2{" +
-            ", level=" + level +
+            " level=" + level +
             ", index=" + index +
             ", expiration=" + PrintDateUtil.parseDate(this.expiration.get()) +
             ", size=" + linkedList.size() +

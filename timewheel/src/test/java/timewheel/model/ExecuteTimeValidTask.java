@@ -2,6 +2,7 @@ package timewheel.model;
 
 import org.jboss.netty.util.Timeout;
 import org.jboss.netty.util.TimerTask;
+import timewheel.util.PrintDateUtil;
 
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
@@ -37,7 +38,9 @@ public class ExecuteTimeValidTask implements Runnable, TimerTask {
 
     private void runTask(){
         SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss:SSS");
-        System.out.println("ExecuteTimeValidTask execute!" + simpleDateFormat.format(new Date()));
+        System.out.println("ExecuteTimeValidTask execute!" + simpleDateFormat.format(new Date())
+            + " needExecuteTime=" + PrintDateUtil.parseDate(needExecuteTime)
+        );
         executeTimeValid();
     }
 

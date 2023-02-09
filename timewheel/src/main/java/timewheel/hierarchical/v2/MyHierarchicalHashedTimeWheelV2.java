@@ -1,6 +1,7 @@
 package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
+import timewheel.util.PrintDateUtil;
 
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -8,7 +9,6 @@ import java.util.Date;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
 public class MyHierarchicalHashedTimeWheelV2 {
 
@@ -30,7 +30,7 @@ public class MyHierarchicalHashedTimeWheelV2 {
     /**
      * 上一层时间跨度更大的时间轮
      * */
-    private MyHierarchicalHashedTimeWheelV2 overFlowWheel;
+    private volatile MyHierarchicalHashedTimeWheelV2 overFlowWheel;
 
     /**
      * 用于实际执行到期任务的线程池
@@ -75,20 +75,21 @@ public class MyHierarchicalHashedTimeWheelV2 {
             // deadline太小了,连1tick都不到就要被执行
             // 直接去执行即可
             this.taskExecutor.execute(timeoutTaskNode.getTargetTask());
-        }else if(deadline > currentTime + this.interval){
-            System.out.println("超过了当前时间轮的承载范围, 加入到上层时间轮");
+        }else if(deadline >= currentTime + this.interval){
+            System.out.println("超过了当前时间轮的承载范围, 加入到上层时间轮"
+                + " deadline=" + PrintDateUtil.parseDate(deadline)
+                + " currentTime=" + PrintDateUtil.parseDate(currentTime)
+                + " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(perTickTime) + "ms"
+                + " interval=" + TimeUnit.NANOSECONDS.toMillis(interval) + "ms"
+            );
 
             // 超过了当前时间轮的承载范围, 加入到上层时间轮
 
             // 上层时间轮不存在，创建之
-            if(this.overFlowWheel == null){
-                // 上层时间轮的环形数组大小保持不变，perTick是当前时间轮的整个间隔(类似低层的60秒等于上一层的1分钟)
-                this.overFlowWheel = new MyHierarchicalHashedTimeWheelV2(
-                    this.ringBucketArray.length, this.currentTime, this.interval, this.taskExecutor,this.level+1,this.delayQueue);
-            }
+            MyHierarchicalHashedTimeWheelV2 overflowWheel = getOverflowWheel();
 
             // 加入到上一层的时间轮中(对于较大的deadline，addTimeoutTask操作可能会递归数次，放到第N层的时间轮中)
-            this.overFlowWheel.addTimeoutTask(timeoutTaskNode);
+            overflowWheel.addTimeoutTask(timeoutTaskNode);
         }else{
             // 当前时间轮放得下，找到对应的位置
 
@@ -128,29 +129,42 @@ public class MyHierarchicalHashedTimeWheelV2 {
      * 和v1版本不同，是在最近的bucket被拉取时才执行的
      * 所以要基于bucket中设置的超时时间expiration来更新当前时间
      * */
-    public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket,Consumer<MyTimeoutTaskNode> flushInLowerWheelFn){
-        if(this.level == 0){
-            // 如果是最底层的时间轮，将当前tick下命中的bucket中的任务丢到taskExecutor中执行
-            bucket.expireTimeoutTask(this.taskExecutor);
-        }else{
-            // 如果不是最底层的时间轮，将当前tick下命中的bucket中的任务交给下一层的时间轮
-            // 这里转交到下一层有两种方式：第一种是从上到下的转交，另一种是当做新任务一样还是从最下层的时间轮开始放，放不下再往上溢出
-            // 选用后一种逻辑，最大的复用已有的创建新任务的逻辑，会好理解一点
-            bucket.flush(flushInLowerWheelFn);
-        }
-
+    public void advanceClockByTick(MyHierarchyHashedTimeWheelBucketV2 bucket){
         long expiration = bucket.getExpiration();
 
+        System.out.println("===============================");
+        System.out.println("advanceClockByTick" +
+            " expiration=" + PrintDateUtil.parseDate(expiration) +
+            " currentTime=" + PrintDateUtil.parseDate(currentTime) +
+            " perTickTime=" + TimeUnit.NANOSECONDS.toMillis(this.perTickTime) +
+            " level=" + level
+        );
+        System.out.println("===============================");
+
         // bucket的expiration可以理解为当前时间，如果当前时间比当前时间轮的原有时间 + 1tick大，说明需要推进当前时间轮的刻度了
-        if(expiration > this.currentTime + this.perTickTime){
-            System.out.println("更新当前时间轮的刻度 level=" + level);
+        if(expiration >= this.currentTime + this.perTickTime){
+//            System.out.println("更新当前时间轮的刻度 level=" + level);
             // 更新当前时间轮的刻度
             this.currentTime = expiration - (expiration % this.perTickTime);
+
             if (this.overFlowWheel != null) {
                 // 计算当前是否需要推进上一层的时间轮
-                this.overFlowWheel.advanceClockByTick(bucket,flushInLowerWheelFn);
+                this.overFlowWheel.advanceClockByTick(bucket);
             }
         }
+    }
+
+    private MyHierarchicalHashedTimeWheelV2 getOverflowWheel() {
+        if (this.overFlowWheel == null) {
+            synchronized (this) {
+                if(this.overFlowWheel == null){
+                    // 上层时间轮的环形数组大小保持不变，perTick是当前时间轮的整个间隔(类似低层的60秒等于上一层的1分钟)
+                    this.overFlowWheel = new MyHierarchicalHashedTimeWheelV2(
+                        this.ringBucketArray.length, this.currentTime, this.interval, this.taskExecutor,this.level+1,this.delayQueue);
+                }
+            }
+        }
+        return this.overFlowWheel;
     }
 
     @Override
