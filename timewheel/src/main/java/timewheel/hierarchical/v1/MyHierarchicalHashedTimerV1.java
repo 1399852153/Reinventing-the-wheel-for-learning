@@ -1,21 +1,24 @@
 package timewheel.hierarchical.v1;
 
 import timewheel.MyTimeoutTaskNode;
+import timewheel.Timer;
+import timewheel.hierarchical.v2.MyHierarchicalHashedTimerV2;
 
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 层次时间轮，会存在空转问题
  * */
-public class MyHierarchicalHashedTimerV1 {
+public class MyHierarchicalHashedTimerV1 implements Timer {
 
     /**
-     * 用于实际执行到期任务的线程池
+     * 是否已启动
      * */
-    private final Executor taskExecutor;
+    private AtomicBoolean started = new AtomicBoolean(false);
 
     /**
      * 世间轮启动时的具体时间戳(单位：纳秒nanos)
@@ -49,7 +52,6 @@ public class MyHierarchicalHashedTimerV1 {
      * */
     public MyHierarchicalHashedTimerV1(int ringArraySize, long perTickTime, Executor taskExecutor) {
         this.perTickTime = perTickTime;
-        this.taskExecutor = taskExecutor;
 
         // 初始化最底层的时间轮
         this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV1(ringArraySize,perTickTime,taskExecutor,0);
@@ -59,11 +61,19 @@ public class MyHierarchicalHashedTimerV1 {
      * 启动worker线程等初始化操作，必须执行完成后才能正常工作
      * (简单起见，和netty不一样不是等任务被创建时才懒加载的，必须提前启动)
      * */
+    @Override
     public void startTimeWheel(){
         // 启动worker线程
-        new Thread(new MyHierarchicalHashedTimerV1.Worker()).start();
+        new Thread(new Worker()).start();
+
+        while (!this.started.get()){
+            // 自旋循环，等待一会
+        }
+
+        System.out.println("startTimeWheel 启动完成");
     }
 
+    @Override
     public void newTimeoutTask(Runnable task, long delayTime, TimeUnit timeUnit){
         long deadline = System.nanoTime() + timeUnit.toNanos(delayTime);
 
@@ -84,7 +94,8 @@ public class MyHierarchicalHashedTimerV1 {
         @Override
         public void run() {
             MyHierarchicalHashedTimerV1.this.startTime = System.nanoTime();
-//            System.out.println("MyHierarchicalHashedTimerV1.this.startTime=" + MyHierarchicalHashedTimerV1.this.startTime);
+            // 启动
+            MyHierarchicalHashedTimerV1.this.started.set(true);
 
             // 简单起见，不考虑优雅启动和暂停的逻辑
             while (true){

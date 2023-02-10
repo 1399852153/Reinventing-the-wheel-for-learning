@@ -1,14 +1,17 @@
 package timewheel;
 
+import timewheel.hierarchical.v2.MyHierarchicalHashedTimerV2;
+
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 参考netty实现的单层时间轮
  * */
-public class MyHashedTimeWheel {
+public class MyHashedTimeWheel implements Timer{
 
     /**
      * 环形数组
@@ -19,6 +22,11 @@ public class MyHashedTimeWheel {
      * 世间轮启动时的具体时间戳(单位：纳秒nanos)
      * */
     private long startTime;
+
+    /**
+     * 是否已启动
+     * */
+    private final AtomicBoolean started = new AtomicBoolean(false);
 
     /**
      * 时间轮每次转动的时间(单位：纳秒nanos)
@@ -42,6 +50,8 @@ public class MyHashedTimeWheel {
      * */
     private final Executor taskExecutor;
 
+    private Thread workerThread;
+
     /**
      * 构造函数
      * */
@@ -60,11 +70,20 @@ public class MyHashedTimeWheel {
      * 启动worker线程等初始化操作，必须执行完成后才能正常工作
      * (简单起见，和netty不一样不是等任务被创建时才懒加载的，必须提前启动)
      * */
+    @Override
     public void startTimeWheel(){
         // 启动worker线程
-        new Thread(new Worker()).start();
+        this.workerThread = new Thread(new Worker());
+        this.workerThread.start();
+
+        while (!this.started.get()){
+            // 自旋循环，等待一会
+        }
+
+        System.out.println("startTimeWheel 启动完成");
     }
 
+    @Override
     public void newTimeoutTask(Runnable task, long delayTime, TimeUnit timeUnit){
         long deadline = System.nanoTime() + timeUnit.toNanos(delayTime);
 
@@ -85,6 +104,9 @@ public class MyHashedTimeWheel {
         @Override
         public void run() {
             MyHashedTimeWheel.this.startTime = System.nanoTime();
+
+            // 启动
+            MyHashedTimeWheel.this.started.set(true);
 
             // 简单起见，不考虑优雅启动和暂停的逻辑
             while (true){
@@ -117,7 +139,6 @@ public class MyHashedTimeWheel {
             // 因为nextTickTime是纳秒，sleep需要的是毫秒，需要保证纳秒数过小时，导致直接计算出来的毫秒数为0
             // 因此(‘实际休眠的纳秒数’+999999)/1000000,保证了纳秒转毫秒时，至少会是1毫秒，而不会出现sleep(0毫秒)令cpu空转
             long needSleepTime = (nextTickTime - System.nanoTime() + 999999) / 1000000;
-//            System.out.println("waitForNextTick needSleepTime=" + needSleepTime);
             try {
                 // 比起netty，忽略了一些处理特殊场景bug的逻辑
                 Thread.sleep(needSleepTime);
