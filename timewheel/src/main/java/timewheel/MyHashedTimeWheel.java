@@ -80,7 +80,7 @@ public class MyHashedTimeWheel implements Timer{
             // 自旋循环，等待一会
         }
 
-        System.out.println("startTimeWheel 启动完成");
+        System.out.println("startTimeWheel 启动完成:" + this.getClass().getSimpleName());
     }
 
     @Override

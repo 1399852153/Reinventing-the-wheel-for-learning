@@ -19,6 +19,8 @@ public class NettyTimeWheelAdaptor implements Timer {
     @Override
     public void startTimeWheel() {
         // netty的时间轮无需初始化，直接加任务就行
+
+        System.out.println("startTimeWheel 启动完成:" + this.getClass().getSimpleName());
     }
 
     @Override

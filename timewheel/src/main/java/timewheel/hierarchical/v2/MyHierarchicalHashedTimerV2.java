@@ -64,10 +64,9 @@ public class MyHierarchicalHashedTimerV2 implements Timer {
 
         while (!this.started.get()){
             // 自旋循环，等待一会
-            System.out.println("自旋循环，等待一会");
         }
 
-        System.out.println("startTimeWheel 启动完成 " + this.started.get() + " wheel" + this.lowestTimeWheel);
+        System.out.println("startTimeWheel 启动完成:" + this.getClass().getSimpleName());
     }
 
     @Override

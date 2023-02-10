@@ -32,7 +32,7 @@ public class TestTimeWheel {
 
     private static final int totalTask = 100;
 
-    private static final long taskDelayNum = 300;
+    private static final long taskDelayNum = 200;
     private static final TimeUnit taskDelayUnit = TimeUnit.MILLISECONDS;
 
 
