@@ -2,10 +2,8 @@ package timewheel.netty;
 
 import org.jboss.netty.util.HashedWheelTimer;
 import timewheel.Timer;
-import timewheel.model.ErrorCollector;
 import timewheel.model.ExecuteTimeValidTask;
 
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 public class NettyTimeWheelAdaptor implements Timer {

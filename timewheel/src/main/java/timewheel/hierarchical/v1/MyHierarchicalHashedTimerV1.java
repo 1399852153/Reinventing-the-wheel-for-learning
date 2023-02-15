@@ -2,7 +2,6 @@ package timewheel.hierarchical.v1;
 
 import timewheel.MyTimeoutTaskNode;
 import timewheel.Timer;
-import timewheel.hierarchical.v2.MyHierarchicalHashedTimerV2;
 
 import java.util.Queue;
 import java.util.concurrent.Executor;

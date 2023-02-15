@@ -1,7 +1,5 @@
 package timewheel;
 
-import timewheel.hierarchical.v2.MyHierarchicalHashedTimerV2;
-
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -172,7 +170,7 @@ public class MyHashedTimeWheel implements Timer{
                 // 如果传入的deadline早于当前系统时间，则totalTickWhenTimeout可能会小于当前的totalTick
                 // 这种情况下，让这个任务在当前tick下就立即超时而被调度是最合理的，而不能在求余后放到一个错误的位置而等一段时间才调度（所以必须取两者的最大值）
                 final long ticks = Math.max(totalTickWhenTimeout, MyHashedTimeWheel.this.totalTick); // Ensure we don't schedule for past.
-                // 如果能限制环形数组的长度为2的幂，则可以改为ticks & mask，位运算效率更高
+                // 如果能限制环形数组的长度为2的幂，则和netty一样改为ticks & mask(ringBucketArray.length-1)，位运算效率更高
                 int stopIndex = (int) (ticks % MyHashedTimeWheel.this.ringBucketArray.length);
                 MyHashedTimeWheelBucket bucket = MyHashedTimeWheel.this.ringBucketArray[stopIndex];
                 // 计算并找到应该被放置的那个bucket后，将其插入当前bucket指向的链表中

@@ -86,7 +86,6 @@ public class MyHierarchicalHashedTimeWheelV2 {
             boolean isNewRound = bucket.setExpiration(expiration);
             if(isNewRound){
                 this.bucketDelayQueue.offer(bucket);
-//                System.out.println(bucketDelayQueue);
             }
         }else{
             // 当前时间轮放不下

@@ -2,9 +2,7 @@ package timewheel.hierarchical.v2;
 
 import timewheel.MyTimeoutTaskNode;
 import timewheel.Timer;
-import timewheel.util.PrintDateUtil;
 
-import java.sql.Time;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -107,9 +105,7 @@ public class MyHierarchicalHashedTimerV2 implements Timer {
     private final class Worker implements Runnable {
         @Override
         public void run() {
-
             MyHierarchicalHashedTimerV2.this.startTime = System.nanoTime();
-            System.out.println("startTime=" + PrintDateUtil.parseDate(MyHierarchicalHashedTimerV2.this.startTime));
 
             // 初始化最底层的时间轮
             MyHierarchicalHashedTimerV2.this.lowestTimeWheel = new MyHierarchicalHashedTimeWheelV2(
