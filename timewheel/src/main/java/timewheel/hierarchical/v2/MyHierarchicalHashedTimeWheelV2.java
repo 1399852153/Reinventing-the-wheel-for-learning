@@ -13,11 +13,6 @@ public class MyHierarchicalHashedTimeWheelV2 {
     private volatile MyHierarchicalHashedTimeWheelV2 overflowTimeWheel;
 
     /**
-     * 时间轮的启动时间（单位:纳秒）
-     * */
-    private final long startTime;
-
-    /**
      * 每次tick的间隔（单位:纳秒）
      * */
     private final long perTickTime;
@@ -52,7 +47,6 @@ public class MyHierarchicalHashedTimeWheelV2 {
             this.ringBucketArray[i] = new MyHierarchyHashedTimeWheelBucketV2();
         }
 
-        this.startTime = startTime;
         // 初始化时，当前时间为startTime
         this.currentTime = startTime - (startTime % perTickTime);
         this.perTickTime = perTickTime;
