@@ -11,3 +11,6 @@
 * [jdk线程池ThreadPoolExecutor工作原理解析（自己动手实现线程池）（一）](https://www.cnblogs.com/xiaoxiongcanguan/p/16879296.html)  
 * [jdk线程池ThreadPoolExecutor优雅停止原理解析（自己动手实现线程池）（二）](https://www.cnblogs.com/xiaoxiongcanguan/p/16901298.html)
 * [jdk调度任务线程池ScheduledThreadPoolExecutor工作原理解析](https://www.cnblogs.com/xiaoxiongcanguan/p/16999791.html)
+
+## 自己动手实现时间轮
+* [时间轮工作原理解析](https://www.cnblogs.com/xiaoxiongcanguan/p/17128575.html)
